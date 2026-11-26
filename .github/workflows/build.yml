@@ -1,17 +1,7 @@
-name: Build (macOS test)
+name: Build (Apple Silicon test)
 
 on:
   workflow_dispatch:
-    inputs:
-      architecture:
-        description: 'Mac CPU architecture'
-        type: choice
-        options:
-          - both
-          - arm64
-          - amd64
-        default: both
-        required: true
 
 permissions:
   contents: read
@@ -19,8 +9,6 @@ permissions:
 jobs:
   build:
     runs-on: macos-latest
-    env:
-      MAC_ARCH: ${{ inputs.architecture }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -60,49 +48,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          case "$MAC_ARCH" in
-            both)
-              wails3 task darwin:build:universal VERSION="$VERSION"
-              for arch in amd64 arm64; do
-                cp "bin/uniTerm-$arch" bin/uniTerm
-                wails3 task darwin:create:app:bundle
-                mv bin/uniTerm.app "bin/uniTerm-$arch.app"
-              done
-              ;;
-            arm64|amd64)
-              wails3 build GOOS=darwin ARCH="$MAC_ARCH" VERSION="$VERSION"
-              wails3 task darwin:create:app:bundle
-              mv bin/uniTerm.app "bin/uniTerm-$MAC_ARCH.app"
-              ;;
-            *) echo "Unsupported architecture: $MAC_ARCH" >&2; exit 1 ;;
-          esac
+          wails3 build GOOS=darwin ARCH=arm64 VERSION="$VERSION"
+          wails3 task darwin:create:app:bundle
 
       - name: Package macOS installer
         shell: bash
         run: |
           set -euo pipefail
-          ARCHES="$MAC_ARCH"
-          if [ "$MAC_ARCH" = both ]; then ARCHES="amd64 arm64"; fi
-          for arch in $ARCHES; do
-            APP="bin/uniTerm-$arch.app"
-            STAGE="$GITHUB_WORKSPACE/dmg_staging_$arch"
-            mkdir -p "$STAGE"
-            cp -R "$APP" "$STAGE/uniTerm.app"
-            ln -s /Applications "$STAGE/Applications"
-            if ! hdiutil create -volname uniTerm -srcfolder "$STAGE" -ov -format UDZO "uniterm-darwin-$arch-$VERSION.dmg"; then
-              # If DMG packaging fails, provide the complete installable app.
-              rm -f "uniterm-darwin-$arch-$VERSION.dmg"
-              ditto -c -k --sequesterRsrc --keepParent "$APP" "uniterm-darwin-$arch-$VERSION.zip"
-            fi
-            rm -rf "$STAGE"
-          done
+          APP="bin/uniTerm.app"
+          STAGE="$GITHUB_WORKSPACE/dmg_staging_arm64"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/uniTerm.app"
+          ln -s /Applications "$STAGE/Applications"
+          if ! hdiutil create -volname uniTerm -srcfolder "$STAGE" -ov -format UDZO "uniterm-darwin-arm64-$VERSION.dmg"; then
+            rm -f "uniterm-darwin-arm64-$VERSION.dmg"
+            ditto -c -k --sequesterRsrc --keepParent "$APP" "uniterm-darwin-arm64-$VERSION.zip"
+          fi
+          rm -rf "$STAGE"
 
       - name: Upload macOS installer
         uses: actions/upload-artifact@v7
         with:
-          name: uniTerm-macOS-${{ inputs.architecture }}
+          name: uniTerm-macOS-arm64
           if-no-files-found: error
           compression-level: 0
           path: |
-            uniterm-darwin-*.dmg
-            uniterm-darwin-*.zip
+            uniterm-darwin-arm64-*.dmg
+            uniterm-darwin-arm64-*.zip
