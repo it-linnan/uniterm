@@ -19,7 +19,41 @@
           <div v-for="f in sec.fields" :key="f.label" class="detail-row">
             <span class="detail-label">{{ f.label }}</span>
             <span class="detail-value">{{ fieldText(f) }}</span>
+            <button class="btn btn-ghost btn-icon btn-sm" :title="t('k8s.copy')" :aria-label="t('k8s.copy')" @click="copyText(fieldText(f))"><Copy size="14" /></button>
           </div>
+        </div>
+        <div v-if="resourceKey === 'configmaps'" class="detail-section">
+          <div class="detail-section-title">Data ({{ configEntries.length }})</div>
+          <details v-for="entry in configEntries" :key="entry.key" class="config-entry" @toggle="onConfigToggle(entry.key, $event)">
+            <summary>
+              <span class="config-key">{{ entry.key }}</span>
+              <el-button link size="small" @click.stop.prevent="copyText(entry.key)">{{ t('k8s.copy') }} Key</el-button>
+              <el-button link size="small" @click.stop.prevent="copyText(entry.value)">{{ t('k8s.copy') }}</el-button>
+              <el-button v-if="!target?.immutable" link size="small" @click.stop.prevent="editConfig(entry.key, entry.value)">{{ t('k8s.edit') }}</el-button>
+            </summary>
+            <div v-if="expandedConfig.has(entry.key)" class="config-editor">
+              <SyntaxEditor :model-value="entry.value" :lang="configLanguage(entry.key, entry.value)" readonly compact />
+            </div>
+          </details>
+          <div v-if="!configEntries.length">—</div>
+          <details v-if="Object.keys(target?.binaryData || {}).length" class="config-entry">
+            <summary>binaryData (Base64)</summary>
+            <div v-for="(value, key) in target.binaryData" :key="key" class="detail-row">
+              <span class="detail-value">{{ key }}</span>
+              <el-button link @click="copyText(String(value))">{{ t('k8s.copy') }}</el-button>
+            </div>
+          </details>
+        </div>
+        <div v-if="configEditKey !== null" class="detail-section">
+          <div class="detail-section-title">{{ configEditKey }}</div>
+          <div class="config-editor">
+            <SyntaxEditor ref="configEditorRef" v-model="configDraft" :lang="configLanguage(configEditKey, configOriginal)" compact />
+          </div>
+          <div class="yaml-actions">
+            <el-button size="small" type="primary" :loading="saving" @click="saveConfig">{{ t('common.save') }}</el-button>
+            <el-button size="small" :disabled="saving" @click="configEditKey = null">{{ t('common.cancel') }}</el-button>
+          </div>
+          <div v-if="saveError" class="yaml-error">{{ saveError }}</div>
         </div>
         <!-- Pod events (async) -->
         <div v-if="isPod" class="detail-section">
@@ -92,7 +126,9 @@ import { requestJSON, startLogStream, type LogHandle } from '../services/k8sClie
 import { useI18n } from '../i18n'
 import Menu from './Menu.vue'
 import SyntaxEditor from './SyntaxEditor.vue'
-import { Clipboard } from '@wailsio/runtime'
+import { writeClipboard } from '../composables/useClipboardWrite'
+import { configLanguage } from '../services/k8sUx'
+import { Copy } from '@lucide/vue'
 import MenuItem from './MenuItem.vue'
 
 const props = defineProps<{ connId: string; mode: 'detail' | 'logs' | null; target: any | null; resourceKey: string; selfPathOverride?: (obj: any) => string; initialTab?: 'detail' | 'yaml' }>()
@@ -115,9 +151,7 @@ function onCopyContextMenu(e: MouseEvent) {
 
 async function onCopyMenu() {
   const sel = window.getSelection()?.toString() || ''
-  if (sel) {
-    try { await Clipboard.SetText(sel) } catch { try { await navigator.clipboard.writeText(sel) } catch { /* ignore */ } }
-  }
+  if (sel) await copyText(sel)
   copyMenuVisible.value = false
 }
 
@@ -159,10 +193,55 @@ const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const saveError = ref('')
+const expandedConfig = ref(new Set<string>())
+const configEditKey = ref<string | null>(null)
+const configDraft = ref('')
+const configOriginal = ref('')
+const configEditorRef = ref<InstanceType<typeof SyntaxEditor> | null>(null)
+const configEntries = computed(() => Object.entries(props.target?.data || {}).map(([key, value]) => ({ key, value: String(value) })))
+
+function onConfigToggle(key: string, event: Event) {
+  if ((event.target as HTMLDetailsElement).open) expandedConfig.value.add(key)
+  else expandedConfig.value.delete(key)
+}
+
+async function copyText(text: string) {
+  if (await writeClipboard(text)) ElMessage.success(t('k8s.copied'))
+  else ElMessage.error(t('k8s.copyFailed'))
+}
+
+function editConfig(key: string, value: string) {
+  if (saving.value) return
+  configEditKey.value = key
+  configDraft.value = value
+  configOriginal.value = value
+  saveError.value = ''
+  nextTick(() => configEditorRef.value?.focus())
+}
+
+async function saveConfig() {
+  if (configEditKey.value === null || saving.value || !props.target) return
+  saving.value = true
+  saveError.value = ''
+  try {
+    const value = configEditorRef.value?.getValue() ?? configDraft.value
+    // PUT preserves resourceVersion, so a concurrent change causes a conflict.
+    const updated = { ...props.target, data: { ...props.target.data, [configEditKey.value]: value } }
+    const { status, raw } = await requestJSON(props.connId, 'PUT', selfPath(props.target), JSON.stringify(updated), 'application/json')
+    if (status < 200 || status >= 300) throw new Error(`HTTP ${status}: ${raw?.slice(0, 200) || ''}`)
+    configEditKey.value = null
+    emit('saved')
+    emit('close')
+    ElMessage.success(t('k8s.saved'))
+  } catch (e: any) {
+    saveError.value = String(e?.message || e)
+  } finally { saving.value = false }
+}
 
 watch(() => props.target, () => {
   tab.value = props.initialTab === 'yaml' ? 'yaml' : 'struct'
   editing.value = false; saveError.value = ''
+  configEditKey.value = null; expandedConfig.value = new Set()
   events.value = []; eventsError.value = ''
   if (isPod.value) loadEvents()
 })
@@ -175,7 +254,7 @@ const headerTitle = computed(() => {
 
 const sections = computed<DetailSection[]>(() => {
   const desc = getResource(props.resourceKey)
-  if (desc?.detailSections?.length) return desc.detailSections
+  if (desc?.detailSections?.length) return props.resourceKey === 'configmaps' ? desc.detailSections.filter(s => s.label !== 'Data') : desc.detailSections
   return genericDetailSections()
 })
 
@@ -224,8 +303,7 @@ const yamlText = computed(() => {
 function startEdit() { draft.value = yamlText.value; editing.value = true; saveError.value = '' }
 function cancelEdit() { editing.value = false; saveError.value = '' }
 async function copyYaml() {
-  try { await navigator.clipboard.writeText(yamlText.value); ElMessage.success(t('k8s.copied')) }
-  catch (e: any) { ElMessage.error(`${t('k8s.copyFailed')}: ${e?.message || e}`) }
+  await copyText(yamlText.value)
 }
 
 function selfPath(o: any): string {
@@ -314,6 +392,11 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.config-entry { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin: 0.5rem 0; padding: 0.5rem; }
+.config-entry summary { cursor: pointer; overflow-wrap: anywhere; }
+.config-key { font-family: var(--font-mono); user-select: text; margin-right: 0.5rem; }
+.config-editor { height: 16rem; margin-top: 0.5rem; }
+
 /* Copied verbatim from MonitorTabContent.vue */
 .detail-drawer-backdrop {
   position: absolute;
