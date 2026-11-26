@@ -72,9 +72,23 @@
         :filters="col.filterable ? enumFilters(col) : undefined"
         :filter-method="col.filterable ? (val, row) => cellText(col.value(row, usageOf(row))) === val : undefined"
       >
-        <template #default="{ row }">{{ cellText(col.value(row, usageOf(row))) }}</template>
+        <template #default="{ row }">
+          <span class="copy-cell">
+            <span class="selectable-cell" @click="stopSelectedClick">{{ cellText(col.value(row, usageOf(row))) }}</span>
+            <button v-if="cellText(col.value(row, usageOf(row)))" class="btn btn-ghost btn-icon btn-sm cell-copy" :title="t('k8s.copy')" :aria-label="t('k8s.copy')" @click.stop="copyText(cellText(col.value(row, usageOf(row))))"><Copy size="14" /></button>
+          </span>
+        </template>
       </el-table-column>
 
+      <el-table-column v-if="resourceKey === 'ingresses'" label="URL" min-width="240">
+        <template #default="{ row }">
+          <div v-for="url in ingressUrls(row)" :key="url" class="ingress-link">
+            <a :href="url" :title="url" @click.stop.prevent="openIngress(url)">{{ url }}</a>
+            <button class="btn btn-ghost btn-icon btn-sm" :title="t('k8s.copy')" :aria-label="t('k8s.copy')" @click.stop="copyText(url)"><Copy size="14" /></button>
+          </div>
+          <span v-if="!ingressUrls(row).length">—</span>
+        </template>
+      </el-table-column>
       <el-table-column v-if="actionColWidth" :label="t('k8s.actions')" :width="uiPx(actionColWidth)" fixed="right" class-name="k8s-action-cell">
         <template #default="{ row }">
           <button
@@ -115,6 +129,10 @@ import {
 import { useK8sStore } from '../stores/k8sStore'
 import { useI18n } from '../i18n'
 import K8sCreateDialog from './K8sCreateDialog.vue'
+import { writeClipboard } from '../composables/useClipboardWrite'
+import { openExternalUrl } from '../services/webSftpBridge'
+import { Copy } from '@lucide/vue'
+import { ingressUrls } from '../services/k8sUx'
 import { getResource, age, type ColoredCell } from '../services/k8sResources'
 import { fetchPodMetrics, fetchNodeMetrics, type Usage } from '../services/k8sMetrics'
 import { requestJSON } from '../services/k8sClient'
@@ -212,6 +230,20 @@ const titleLabel = computed(() =>
   props.frame.kind === 'custom' ? props.frame.crd.kind : (desc.value?.label || resourceKey.value))
 const displayCount = computed(() =>
   props.frame.kind === 'custom' ? crdFiltered.value.length : filtered.value.length)
+
+function stopSelectedClick(e: MouseEvent) {
+  if (window.getSelection()?.toString()) e.stopPropagation()
+}
+
+async function copyText(text: string) {
+  if (await writeClipboard(text)) ElMessage.success(t('k8s.copied'))
+  else ElMessage.error(t('k8s.copyFailed'))
+}
+
+async function openIngress(url: string) {
+  try { await openExternalUrl(url) }
+  catch (e: any) { ElMessage.error(String(e?.message || e)) }
+}
 
 function cellText(v: string | number | ColoredCell): string {
   if (v == null) return ''
@@ -547,6 +579,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.copy-cell, .ingress-link { display: flex; align-items: center; gap: 0.25rem; min-width: 0; }
+.selectable-cell { user-select: text; cursor: text; overflow: hidden; text-overflow: ellipsis; }
+.cell-copy { flex-shrink: 0; opacity: 0; }
+.copy-cell:hover .cell-copy, .cell-copy:focus-visible { opacity: 1; }
+.ingress-link a { color: var(--accent); overflow-wrap: anywhere; user-select: text; }
+.ingress-link button { flex-shrink: 0; }
+
 .k8s-list-wrap {
   flex: 1;
   display: flex;
