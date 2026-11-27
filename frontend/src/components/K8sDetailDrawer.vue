@@ -10,7 +10,7 @@
     <template v-if="mode === 'detail'">
       <div class="db-tabs">
         <button class="db-tab" :class="{ active: tab === 'struct' }" @click="tab = 'struct'">{{ t('k8s.detail') }}</button>
-        <button class="db-tab" :class="{ active: tab === 'yaml' }" @click="tab = 'yaml'">YAML</button>
+        <button class="db-tab" :class="{ active: tab === 'yaml' }" :disabled="keyEditVisible" @click="tab = 'yaml'">YAML</button>
       </div>
 
       <div v-show="tab === 'struct'" class="detail-body" @contextmenu="onCopyContextMenu">
@@ -26,20 +26,46 @@
           <template v-for="entry in configEntries" :key="entry.key">
             <div v-if="!entry.multiline" class="detail-row">
               <span class="detail-label config-key">{{ entry.key }}</span>
-              <span class="detail-value">{{ entry.value === '' ? '—' : entry.value }}</span>
-              <el-button v-if="!target?.immutable" link size="small" @click.stop="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
+              <div v-if="isEditingKey(entry.key)" class="detail-value config-inline-edit">
+                <el-input v-model="keyEditDraft" type="textarea" :autosize="{ minRows: 1, maxRows: 5 }" :disabled="keySaving" />
+                <div class="config-edit-actions">
+                  <el-button size="small" :disabled="keySaving" @click="cancelKeyEdit">{{ t('common.cancel') }}</el-button>
+                  <el-button size="small" type="primary" :loading="keySaving" @click="saveKeyEdit">{{ t('common.save') }}</el-button>
+                </div>
+                <div v-if="keySaveError" class="yaml-error">{{ keySaveError }}</div>
+              </div>
+              <template v-else>
+                <span class="detail-value">{{ entry.value === '' ? '—' : entry.value }}</span>
+                <el-button v-if="!target?.immutable" link size="small" :disabled="keyEditVisible || editing || saving" @click.stop="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
+              </template>
             </div>
-            <details v-else class="config-entry" @toggle="onConfigToggle(entry.key, $event)">
-              <summary class="config-key">{{ entry.key }}
-                <el-button v-if="!target?.immutable" link size="small" class="config-edit-button" @click.stop.prevent="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
+            <details v-else class="config-entry" :open="expandedConfig.has(entry.key)" @toggle="onConfigToggle(entry.key, $event)">
+              <summary class="config-key" @click="isEditingKey(entry.key) && $event.preventDefault()">{{ entry.key }}
+                <el-button v-if="!target?.immutable && !isEditingKey(entry.key)" link size="small" class="config-edit-button"
+                  :disabled="keyEditVisible || editing || saving" @click.stop.prevent="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
               </summary>
               <div v-if="expandedConfig.has(entry.key)">
-                <div v-if="entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value" class="config-preview-toolbar">
-                  <el-button size="small" @click="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
+                <template v-if="isEditingKey(entry.key)">
+                  <div v-if="keyEditLang === 'conf'" class="config-edit-encoding">{{ keyEditRaw ? 'Raw' : 'Unicode' }}</div>
+                  <div class="config-preview">
+                    <SyntaxEditor :ref="setKeyEditor" v-model="keyEditDraft" :file-path="keyEditName" :lang="keyEditLang"
+                      compact show-search-button :readonly="keySaving" />
+                  </div>
+                  <div class="config-edit-actions">
+                  <el-button size="small" :disabled="keySaving" @click="cancelKeyEdit">{{ t('common.cancel') }}</el-button>
+                  <el-button size="small" type="primary" :loading="keySaving" @click="saveKeyEdit">{{ t('common.save') }}</el-button>
                 </div>
-                <div class="config-preview">
-                <SyntaxEditor :model-value="entry.lang === 'conf' && !rawProperties.has(entry.key) ? decodePropertiesUnicode(entry.value) : entry.value" :file-path="entry.key" :lang="entry.lang" readonly compact show-search-button />
-                </div>
+                <div v-if="keySaveError" class="yaml-error">{{ keySaveError }}</div>
+                </template>
+                <template v-else>
+                  <div v-if="entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value" class="config-preview-toolbar">
+                    <el-button size="small" @click="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
+                  </div>
+                  <div class="config-preview">
+                    <SyntaxEditor :model-value="entry.lang === 'conf' && !rawProperties.has(entry.key) ? decodePropertiesUnicode(entry.value) : entry.value"
+                      :file-path="entry.key" :lang="entry.lang" readonly compact show-search-button />
+                  </div>
+                </template>
               </div>
             </details>
           </template>
@@ -107,22 +133,6 @@
       </div>
     </div>
 
-    <el-dialog v-model="keyEditVisible" :title="keyEditName" width="min(56rem, 92vw)" append-to-body destroy-on-close
-      :close-on-click-modal="false" :close-on-press-escape="!keySaving" :show-close="!keySaving">
-      <div v-if="keyEditLang === 'conf'" class="config-edit-encoding">
-        {{ keyEditRaw ? 'Raw' : 'Unicode' }}
-      </div>
-      <div class="config-key-editor">
-        <SyntaxEditor ref="keyEditorRef" v-model="keyEditDraft" :file-path="keyEditName" :lang="keyEditLang"
-          compact show-search-button :readonly="keySaving" />
-      </div>
-      <div v-if="keySaveError" class="yaml-error">{{ keySaveError }}</div>
-      <template #footer>
-        <el-button :disabled="keySaving" @click="keyEditVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="keySaving" @click="saveKeyEdit">{{ t('common.save') }}</el-button>
-      </template>
-    </el-dialog>
-
     <Menu ref="copyMenuRef" v-model:visible="copyMenuVisible">
       <MenuItem @click="onCopyMenu">{{ t('k8s.copy') }}</MenuItem>
     </Menu>
@@ -131,7 +141,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { ElButton, ElIcon, ElMessage, ElSelect, ElOption, ElCheckbox, ElDialog } from 'element-plus'
+import { ElButton, ElIcon, ElMessage, ElSelect, ElOption, ElCheckbox, ElInput } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
 import { dump, load } from 'js-yaml'
 import { getResource, genericDetailSections, configMapEntries, type DetailSection } from '../services/k8sResources'
@@ -224,13 +234,26 @@ const keyEditOriginal = ref('')
 const keyEditRaw = ref(false)
 const keyEditDraft = ref('')
 const keyEditorRef = ref<InstanceType<typeof SyntaxEditor> | null>(null)
+function setKeyEditor(editor: unknown) {
+  keyEditorRef.value = editor as InstanceType<typeof SyntaxEditor> | null
+}
+function isEditingKey(key: string) {
+  return keyEditVisible.value && keyEditName.value === key
+}
+function cancelKeyEdit() {
+  if (keySaving.value) return
+  keyEditVisible.value = false
+  keySaveError.value = ''
+  keyEditTarget = null
+  keyEditorRef.value = null
+}
 let keyEditTarget: any = null
 let keyEditConnId = ''
 let keyEditSession = 0
 
 function startKeyEdit(entry: { key: string; value: string; lang?: string }) {
   const obj = savedConfigMap.value || props.target
-  if (!obj || obj.immutable || keySaving.value) return
+  if (!obj || obj.immutable || keySaving.value || keyEditVisible.value || editing.value || saving.value) return
   keyEditTarget = obj
   keyEditConnId = props.connId
   keyEditName.value = entry.key
@@ -240,6 +263,8 @@ function startKeyEdit(entry: { key: string; value: string; lang?: string }) {
   keyEditDraft.value = entry.lang === 'conf' && !keyEditRaw.value ? decodePropertiesUnicode(entry.value) : entry.value
   keySaveError.value = ''
   keyEditSession++
+  keyEditorRef.value = null
+  expandedConfig.value.add(entry.key)
   keyEditVisible.value = true
 }
 
@@ -283,8 +308,15 @@ async function saveKeyEdit() {
 
 
 function onConfigToggle(key: string, event: Event) {
-  if ((event.target as HTMLDetailsElement).open) expandedConfig.value.add(key)
+  const details = event.target as HTMLDetailsElement
+  if (!details.isConnected) return
+  if (isEditingKey(key) && !details.open) {
+    details.open = true
+    return
+  }
+  if (details.open) expandedConfig.value.add(key)
   else expandedConfig.value.delete(key)
+
 }
 
 watch(() => props.target, () => {
@@ -449,7 +481,10 @@ onBeforeUnmount(stopLogs)
 
 <style scoped>
 .config-edit-button { float: right; margin-right: 0.25rem; }
-.config-key-editor { height: min(55vh, 32rem); }
+.config-inline-edit { min-width: 0; }
+.config-edit-actions { display: flex; justify-content: flex-end; gap: 0.25rem; margin-top: 0.5rem; }
+.config-edit-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.db-tab:disabled { opacity: 0.5; cursor: not-allowed; }
 .config-edit-encoding { color: var(--text-muted); font-size: 0.75rem; margin-bottom: 0.375rem; }
 
 .config-preview-toolbar { display: flex; justify-content: flex-end; margin-top: 0.375rem; }
