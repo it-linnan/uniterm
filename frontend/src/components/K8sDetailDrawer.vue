@@ -327,7 +327,7 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
-.k8s-annotations { min-width: 0; word-break: normal; }
+.detail-value.k8s-annotations { min-width: 0; word-break: normal; }
 .k8s-annotation + .k8s-annotation { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
 .k8s-annotation-key { color: var(--text-muted); font-size: 0.75rem; overflow-wrap: anywhere; }
 .k8s-annotation-value, .k8s-annotation summary { overflow-wrap: anywhere; white-space: pre-wrap; }
