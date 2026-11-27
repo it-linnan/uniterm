@@ -30,8 +30,13 @@
             </div>
             <details v-else class="config-entry" @toggle="onConfigToggle(entry.key, $event)">
               <summary class="config-key">{{ entry.key }}</summary>
-              <div v-if="expandedConfig.has(entry.key)" class="config-preview">
-                <SyntaxEditor :model-value="entry.value" :file-path="entry.key" :lang="entry.lang" readonly compact />
+              <div v-if="expandedConfig.has(entry.key)">
+                <div v-if="entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value" class="config-preview-toolbar">
+                  <el-button size="small" @click="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
+                </div>
+                <div class="config-preview">
+                <SyntaxEditor :model-value="entry.lang === 'conf' && !rawProperties.has(entry.key) ? decodePropertiesUnicode(entry.value) : entry.value" :file-path="entry.key" :lang="entry.lang" readonly compact show-search-button />
+                </div>
               </div>
             </details>
           </template>
@@ -115,6 +120,7 @@ import { requestJSON, startLogStream, type LogHandle } from '../services/k8sClie
 import { useI18n } from '../i18n'
 import Menu from './Menu.vue'
 import SyntaxEditor from './SyntaxEditor.vue'
+import { decodePropertiesUnicode } from '../services/propertiesPreview'
 import { Clipboard } from '@wailsio/runtime'
 import MenuItem from './MenuItem.vue'
 
@@ -183,6 +189,11 @@ const draft = ref('')
 const saving = ref(false)
 const saveError = ref('')
 const expandedConfig = ref(new Set<string>())
+const rawProperties = ref(new Set<string>())
+function toggleRawProperties(key: string) {
+  if (rawProperties.value.has(key)) rawProperties.value.delete(key)
+  else rawProperties.value.add(key)
+}
 const configEntries = computed(() => configMapEntries(props.target?.data))
 
 function onConfigToggle(key: string, event: Event) {
@@ -194,6 +205,7 @@ watch(() => props.target, () => {
   tab.value = props.initialTab === 'yaml' ? 'yaml' : 'struct'
   editing.value = false; saveError.value = ''
   expandedConfig.value = new Set()
+  rawProperties.value = new Set()
   events.value = []; eventsError.value = ''
   if (isPod.value) loadEvents()
 })
@@ -346,6 +358,8 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.config-preview-toolbar { display: flex; justify-content: flex-end; margin-top: 0.375rem; }
+
 .config-key { overflow-wrap: anywhere; user-select: text; }
 .detail-label.config-key { width: 40%; min-width: 0; }
 .config-entry { margin: 0.5rem 0; padding: 0.5rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
