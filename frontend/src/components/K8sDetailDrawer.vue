@@ -358,7 +358,7 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
-.ingress-detail-table { min-width: 0; overflow-x: auto; white-space: normal; word-break: normal; }
+.detail-value.ingress-detail-table { min-width: 0; overflow-x: auto; white-space: normal; word-break: normal; }
 .ingress-detail-table table { border-collapse: collapse; width: 100%; text-align: left; }
 .ingress-detail-table th, .ingress-detail-table td { padding: 0.375rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; overflow-wrap: anywhere; }
 .ingress-detail-table th { color: var(--text-muted); font-weight: 500; }
