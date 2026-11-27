@@ -121,17 +121,26 @@ async function onCopyMenu() {
   copyMenuVisible.value = false
 }
 
-// Drawer width (draggable). Defaults widen for logs mode; not persisted.
+// Drawer width (draggable). Remember explicit user resizing across sessions.
 // Max width tracks the actual parent container (not the window) so the drawer
 // never extends past the container's left edge on any screen size.
 const drawerEl = ref<HTMLElement | null>(null)
-const drawerWidth = ref(420)
+const DRAWER_WIDTH_KEY = 'uniterm:k8s-detail-width'
+function readDrawerWidth() {
+  try {
+    const saved = Number(localStorage.getItem(DRAWER_WIDTH_KEY))
+    if (Number.isFinite(saved) && saved >= 320) return saved
+  } catch { /* storage may be unavailable */ }
+  return 640
+}
+let preferredDrawerWidth = readDrawerWidth()
+const drawerWidth = ref(preferredDrawerWidth)
 function maxDrawerWidth() {
   const parent = drawerEl.value?.parentElement
   return parent ? Math.max(320, parent.clientWidth - 40) : window.innerWidth - 120
 }
 watch(() => props.mode, (m) => {
-  if (m === 'logs' && drawerWidth.value < 640) drawerWidth.value = Math.min(640, maxDrawerWidth())
+  if (m) drawerWidth.value = Math.min(preferredDrawerWidth, Math.max(320, maxDrawerWidth()))
 })
 let resizeStartX = 0
 let resizeStartW = 0
@@ -142,6 +151,9 @@ function onResizeMove(e: MouseEvent) {
 function onResizeEnd() {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
+  if (drawerWidth.value === resizeStartW) return
+  preferredDrawerWidth = drawerWidth.value
+  try { localStorage.setItem(DRAWER_WIDTH_KEY, String(preferredDrawerWidth)) } catch { /* storage may be unavailable */ }
 }
 function onResizeStart(e: MouseEvent) {
   // Block the mousedown default action so the drag cannot promote into a text
@@ -310,7 +322,11 @@ watch(() => [props.mode, props.target], () => {
   }
 })
 
-onBeforeUnmount(stopLogs)
+onBeforeUnmount(() => {
+  stopLogs()
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+})
 </script>
 
 <style scoped>
