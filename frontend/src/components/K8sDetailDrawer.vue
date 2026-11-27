@@ -1,6 +1,6 @@
 <template>
   <div class="detail-drawer-backdrop" :class="{ open: !!mode }" @click="$emit('close')"></div>
-  <div ref="drawerEl" class="detail-drawer" :class="{ open: !!mode }" :style="mode ? { width: drawerWidth + 'px' } : undefined">
+  <div ref="drawerEl" @copy="onDetailCopy" class="detail-drawer" :class="{ open: !!mode }" :style="mode ? { width: drawerWidth + 'px' } : undefined">
     <div class="drawer-resizer" @mousedown="onResizeStart"></div>
     <div class="detail-drawer-header">
       <span class="detail-drawer-title">{{ headerTitle }}</span>
@@ -45,7 +45,7 @@
           </template>
         </div>
         <pre v-if="!editing" class="k8s-yaml-drawer-body" @contextmenu="onCopyContextMenu">{{ yamlText }}</pre>
-        <SyntaxEditor v-else v-model="draft" lang="yaml" compact />
+        <SyntaxEditor v-else v-model="draft" lang="yaml" compact selection-copy-menu @selection-contextmenu="onEditorCopyContextMenu" />
         <div v-if="saveError" class="yaml-error">{{ saveError }}</div>
       </div>
     </template>
@@ -92,7 +92,7 @@ import { requestJSON, startLogStream, type LogHandle } from '../services/k8sClie
 import { useI18n } from '../i18n'
 import Menu from './Menu.vue'
 import SyntaxEditor from './SyntaxEditor.vue'
-import { Clipboard } from '@wailsio/runtime'
+import { writeClipboard } from '../composables/useClipboardWrite'
 import MenuItem from './MenuItem.vue'
 
 const props = defineProps<{ connId: string; mode: 'detail' | 'logs' | null; target: any | null; resourceKey: string; selfPathOverride?: (obj: any) => string; initialTab?: 'detail' | 'yaml' }>()
@@ -104,21 +104,32 @@ const { t } = useI18n()
 // selected; positioned at the pointer (Menu.openAt, viewport-adaptive).
 const copyMenuRef = ref<InstanceType<typeof Menu> | null>(null)
 const copyMenuVisible = ref(false)
+const copyMenuText = ref('')
 
-function onCopyContextMenu(e: MouseEvent) {
-  const sel = window.getSelection()?.toString() || ''
-  if (!sel) return
+function onEditorCopyContextMenu(e: MouseEvent, text: string) {
+  if (!text) return
   e.preventDefault()
   e.stopPropagation()
+  copyMenuText.value = text
   copyMenuRef.value?.openAt(e.clientX, e.clientY)
 }
 
+function onCopyContextMenu(e: MouseEvent) {
+  onEditorCopyContextMenu(e, window.getSelection()?.toString() || '')
+}
+
 async function onCopyMenu() {
-  const sel = window.getSelection()?.toString() || ''
-  if (sel) {
-    try { await Clipboard.SetText(sel) } catch { try { await navigator.clipboard.writeText(sel) } catch { /* ignore */ } }
-  }
+  if (copyMenuText.value && !await writeClipboard(copyMenuText.value)) ElMessage.error(t('k8s.copyFailed'))
   copyMenuVisible.value = false
+  copyMenuText.value = ''
+}
+
+function onDetailCopy(e: ClipboardEvent) {
+  if ((e.target as HTMLElement | null)?.closest?.('.syntax-editor')) return
+  const text = window.getSelection()?.toString() || ''
+  if (!text) return
+  e.preventDefault()
+  void writeClipboard(text).then(ok => { if (!ok) ElMessage.error(t('k8s.copyFailed')) })
 }
 
 // Drawer width (draggable). Defaults widen for logs mode; not persisted.
@@ -224,8 +235,8 @@ const yamlText = computed(() => {
 function startEdit() { draft.value = yamlText.value; editing.value = true; saveError.value = '' }
 function cancelEdit() { editing.value = false; saveError.value = '' }
 async function copyYaml() {
-  try { await navigator.clipboard.writeText(yamlText.value); ElMessage.success(t('k8s.copied')) }
-  catch (e: any) { ElMessage.error(`${t('k8s.copyFailed')}: ${e?.message || e}`) }
+  if (await writeClipboard(yamlText.value)) ElMessage.success(t('k8s.copied'))
+  else ElMessage.error(t('k8s.copyFailed'))
 }
 
 function selfPath(o: any): string {
