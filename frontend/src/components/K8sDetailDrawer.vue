@@ -269,7 +269,16 @@ const annotationEntries = computed(() => Object.entries((props.target?.metadata?
 
 // A resource may expose conditions even when its descriptor has no explicit field.
 const sections = computed<DetailSection[]>(() => {
-  const existing = baseSections.value
+  const metadata = props.target?.metadata
+  const existing = baseSections.value.map(sec => ({
+    ...sec,
+    fields: sec.fields.filter(field => {
+      if (field.label === 'Labels') return Object.keys(metadata?.labels || {}).length > 0
+      if (field.label === 'Annotations') return Object.keys(metadata?.annotations || {}).length > 0
+      if (field.label === 'Owner') return (metadata?.ownerReferences || []).length > 0
+      return true
+    }),
+  })).filter(sec => sec.fields.length > 0)
   if (!props.target?.status?.conditions?.length || existing.some(sec => sec.fields.some(f => f.label === 'Conditions'))) return existing
   return [...existing, { label: 'Conditions', fields: [{ label: 'Conditions', value: () => '' }] }]
 })
