@@ -3,6 +3,7 @@
   <div ref="drawerEl" @mousedown.capture="onDetailMouseDown" class="detail-drawer" :class="{ open: !!mode }" :style="mode ? { width: drawerWidth + 'px' } : undefined">
     <div class="drawer-resizer" @mousedown="onResizeStart"></div>
     <div class="detail-drawer-header">
+      <el-button v-if="canGoBack" link :disabled="editing || keyEditVisible || saving || keySaving" @click="$emit('back')">‹ Back</el-button>
       <span class="detail-drawer-title">{{ headerTitle }}</span>
       <el-button link @click="$emit('close')"><el-icon><Close :size="'1rem'" /></el-icon></el-button>
     </div>
@@ -132,6 +133,8 @@
             </details>
           </template>
         </div>
+        <K8sRelatedDetails :conn-id="connId" :resource-key="resourceKey" :target="target"
+          @navigate="navigateRelated" @logs="(name, previous) => $emit('container-logs', name, previous)" @terminal="name => $emit('container-terminal', name)" />
         <!-- Pod events (async) -->
         <div v-if="isPod" class="detail-section">
           <div class="detail-section-title">Events</div>
@@ -206,9 +209,15 @@ import SyntaxEditor from './SyntaxEditor.vue'
 import { decodePropertiesUnicode, restorePropertiesUnicode } from '../services/propertiesPreview'
 import { writeClipboard } from '../composables/useClipboardWrite'
 import MenuItem from './MenuItem.vue'
+import K8sRelatedDetails from './K8sRelatedDetails.vue'
+import { podContainers, type ResourceRef } from '../services/k8sRelations'
 
-const props = defineProps<{ connId: string; mode: 'detail' | 'logs' | null; target: any | null; resourceKey: string; selfPathOverride?: (obj: any) => string; initialTab?: 'detail' | 'yaml' }>()
-const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
+const props = defineProps<{ connId: string; mode: 'detail' | 'logs' | null; target: any | null; resourceKey: string; selfPathOverride?: (obj: any) => string; initialTab?: 'detail' | 'yaml'; canGoBack?: boolean; initialContainer?: string; initialPrevious?: boolean }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void; (e:'navigate', ref:ResourceRef):void; (e:'back'):void; (e:'container-logs', name:string, previous:boolean):void; (e:'container-terminal', name:string):void }>()
+function navigateRelated(ref: ResourceRef) {
+  if (editing.value || keyEditVisible.value || saving.value || keySaving.value) { ElMessage.warning('Save or cancel editing before navigating.'); return }
+  emit('navigate', ref)
+}
 
 const { t } = useI18n()
 
@@ -501,6 +510,8 @@ const sections = computed<DetailSection[]>(() => {
   const existing = baseSections.value.map(sec => ({
     ...sec,
     fields: sec.fields.filter(field => {
+      if (props.resourceKey === 'services' && field.label === 'Ports') return false
+      if (props.resourceKey === 'pods' && ['Containers','Volumes'].includes(field.label)) return false
       if (field.label === 'Labels') return Object.keys(metadata?.labels || {}).length > 0
       if (field.label === 'Annotations') return Object.keys(metadata?.annotations || {}).length > 0
       if (field.label === 'Owner') return (metadata?.ownerReferences || []).length > 0
@@ -610,7 +621,7 @@ const logBody = ref<HTMLElement | null>(null)
 let logHandle: LogHandle | null = null
 let logGen = 0
 
-const containerNames = computed(() => (props.target?.spec?.containers || []).map((c: any) => c.name))
+const containerNames = computed(() => podContainers(props.target).map((c:any) => c.name))
 
 // Split the API's "<RFC3339 timestamp> <message>" line into its two parts.
 function splitLogLine(line: string): { ts: string; msg: string } {
@@ -645,7 +656,8 @@ async function restartLogs() {
 
 watch(() => [props.mode, props.target], () => {
   if (props.mode === 'logs' && props.target) {
-    logContainer.value = containerNames.value[0] || ''
+    logContainer.value = props.initialContainer || containerNames.value[0] || ''
+    logPrevious.value = !!props.initialPrevious
     restartLogs()
   } else {
     stopLogs()

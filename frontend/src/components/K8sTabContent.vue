@@ -82,6 +82,13 @@
       :resource-key="drawerResourceKey"
       :self-path-override="drawerSelfPathOverride"
       :initial-tab="drawerInitialTab"
+      :can-go-back="drawerHistory.length > 0"
+      :initial-container="drawerContainer"
+      :initial-previous="drawerPrevious"
+      @navigate="navigateRelated"
+      @back="backDrawer"
+      @container-logs="openContainerLogs"
+      @container-terminal="name => drawerTarget && doExec(drawerTarget, name)"
       @close="closeDrawer"
       @saved="() => {}"
     />
@@ -109,6 +116,7 @@ import { OVERVIEW_KEY } from '../types/k8s'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
 import { parseCRD, crdListPath } from '../services/k8sCrd'
+import { resourceLocation, type ResourceRef } from '../services/k8sRelations'
 import type { K8sTab, NavFrame } from '../types/k8s'
 import type { ConnectionConfig } from '../types/session'
 
@@ -204,7 +212,20 @@ const drawerTarget = ref<any | null>(null)
 const drawerResourceKey = ref<string>('pods')
 const drawerSelfPathOverride = ref<((obj: any) => string) | undefined>(undefined)
 const drawerInitialTab = ref<'detail' | 'yaml'>('detail')
+const drawerHistory = ref<{target:any;key:string;mode:'detail'|'logs';path?: (obj:any)=>string;tab:'detail'|'yaml'}[]>([])
+const drawerContainer=ref(''),drawerPrevious=ref(false)
+let drawerGeneration=0
+function resetDrawerHistory(){drawerGeneration++;drawerHistory.value=[];drawerContainer.value='';drawerPrevious.value=false}
+function pushDrawer(){if(drawerTarget.value && drawerMode.value)drawerHistory.value.push({target:drawerTarget.value,key:drawerResourceKey.value,mode:drawerMode.value,path:drawerSelfPathOverride.value,tab:drawerInitialTab.value})}
+function backDrawer(){drawerGeneration++;const prev=drawerHistory.value.pop();if(!prev)return;drawerResourceKey.value=prev.key;drawerSelfPathOverride.value=prev.path;drawerInitialTab.value=prev.tab;drawerContainer.value='';drawerPrevious.value=false;drawerTarget.value=prev.target;drawerMode.value=prev.mode}
+async function navigateRelated(ref:ResourceRef){
+  const location=resourceLocation(ref);if(!location)return
+  const gen=++drawerGeneration,conn=connId.value
+  try{const {status,data}=await k8sClient.requestJSON(conn,'GET',location.path);if(gen!==drawerGeneration||conn!==connId.value)return;if(status!==200||!data)throw new Error('HTTP '+status);if(ref.uid && data.metadata?.uid!==ref.uid)throw new Error('Resource was replaced');pushDrawer();drawerResourceKey.value=location.key;drawerSelfPathOverride.value=undefined;drawerInitialTab.value='detail';drawerTarget.value=data;drawerMode.value='detail'}catch(e:any){if(gen===drawerGeneration)ElMessage.error(String(e?.message||e))}
+}
+function openContainerLogs(name:string,previous:boolean){if(!drawerTarget.value)return;pushDrawer();drawerContainer.value=name;drawerPrevious.value=previous;drawerMode.value='logs'}
 function openDetail(obj: any) {
+  resetDrawerHistory()
   drawerTarget.value = obj
   drawerResourceKey.value = resourceKeyOf()
   drawerSelfPathOverride.value = crSelfPathOverride()
@@ -212,14 +233,15 @@ function openDetail(obj: any) {
   drawerMode.value = 'detail'
 }
 function openYaml(obj: any) {
+  resetDrawerHistory()
   drawerTarget.value = obj
   drawerResourceKey.value = resourceKeyOf()
   drawerSelfPathOverride.value = crSelfPathOverride()
   drawerInitialTab.value = 'yaml'
   drawerMode.value = 'detail'
 }
-function openLogs(pod: any) { drawerTarget.value = pod; drawerResourceKey.value = 'pods'; drawerSelfPathOverride.value = undefined; drawerMode.value = 'logs' }
-function closeDrawer() { drawerMode.value = null; drawerTarget.value = null }
+function openLogs(pod: any) { resetDrawerHistory(); drawerTarget.value = pod; drawerResourceKey.value = 'pods'; drawerSelfPathOverride.value = undefined; drawerMode.value = 'logs' }
+function closeDrawer() { resetDrawerHistory(); drawerMode.value = null; drawerTarget.value = null }
 function resourceKeyOf(): string {
   const f = topFrame.value
   if (f.kind === 'list') return f.resourceKey
