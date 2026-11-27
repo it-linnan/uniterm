@@ -318,7 +318,7 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
-.k8s-labels { display: flex; flex-wrap: wrap; gap: 0.375rem; min-width: 0; }
+.detail-value.k8s-labels { display: flex; flex-wrap: wrap; gap: 0.375rem; min-width: 0; }
 .k8s-label-chip { max-width: 100%; padding: 0.2rem 0.375rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-hover); overflow-wrap: anywhere; word-break: normal; }
 
 /* Copied verbatim from MonitorTabContent.vue */
