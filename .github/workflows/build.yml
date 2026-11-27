@@ -53,7 +53,7 @@ jobs:
 
       - name: Run K8s resource unit tests
         working-directory: frontend
-        run: npx --no-install vitest run src/services/k8sResources.test.ts
+        run: npx --no-install vitest run src/services/k8sResources.test.ts src/services/propertiesPreview.test.ts
 
       - name: Package macOS installer
         shell: bash
