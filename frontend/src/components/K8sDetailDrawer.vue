@@ -18,7 +18,29 @@
           <div class="detail-section-title">{{ sec.label }}</div>
           <div v-for="f in sec.fields" :key="f.label" class="detail-row">
             <span class="detail-label">{{ f.label }}</span>
-            <span class="detail-value">{{ fieldText(f) }}</span>
+            <div v-if="resourceKey === 'ingresses' && f.label === 'Rules'" class="detail-value ingress-detail-table">
+              <table v-if="ingressRoutes.length">
+                <thead><tr><th>Host</th><th>Path</th><th>Path Type</th><th>Backend</th><th>Port</th></tr></thead>
+                <tbody>
+                  <tr v-for="(route, index) in ingressRoutes" :key="index">
+                    <td>{{ route.host }}</td><td>{{ route.path }}</td><td>{{ route.pathType }}</td><td>{{ route.backend }}</td><td>{{ route.port }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <span v-else>—</span>
+            </div>
+            <div v-else-if="resourceKey === 'ingresses' && f.label === 'TLS'" class="detail-value ingress-detail-table">
+              <table v-if="target?.spec?.tls?.length">
+                <thead><tr><th>Hosts</th><th>Secret</th></tr></thead>
+                <tbody>
+                  <tr v-for="(tls, index) in target.spec.tls" :key="index">
+                    <td>{{ (tls.hosts || []).join(', ') || '—' }}</td><td>{{ tls.secretName || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <span v-else>—</span>
+            </div>
+            <span v-else class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
         <!-- Pod events (async) -->
@@ -179,6 +201,28 @@ const sections = computed<DetailSection[]>(() => {
   return genericDetailSections()
 })
 
+// Show both service and resource backends, including the default backend.
+const ingressRoutes = computed(() => {
+  const routes: { host: string; path: string; pathType: string; backend: string; port: string }[] = []
+  const spec = props.target?.spec
+  function append(host: string, path: string, pathType: string, backend: any) {
+    const service = backend?.service
+    const resource = backend?.resource
+    routes.push({
+      host, path, pathType,
+      backend: service?.name || (resource?.name ? [resource.apiGroup, resource.kind, resource.name].filter(Boolean).join('/') : '—'),
+      port: String(service?.port?.number ?? service?.port?.name ?? '—'),
+    })
+  }
+  for (const rule of spec?.rules || []) {
+    for (const path of rule.http?.paths || []) {
+      append(rule.host || '*', path.path || '/', path.pathType || '—', path.backend)
+    }
+  }
+  if (spec?.defaultBackend) append('*', '—', 'Default backend', spec.defaultBackend)
+  return routes
+})
+
 function fieldText(f: any): string {
   if (!props.target) return ''
   const v = f.value(props.target)
@@ -314,6 +358,11 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.ingress-detail-table { min-width: 0; overflow-x: auto; white-space: normal; word-break: normal; }
+.ingress-detail-table table { border-collapse: collapse; width: 100%; text-align: left; }
+.ingress-detail-table th, .ingress-detail-table td { padding: 0.375rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; overflow-wrap: anywhere; }
+.ingress-detail-table th { color: var(--text-muted); font-weight: 500; }
+
 /* Copied verbatim from MonitorTabContent.vue */
 .detail-drawer-backdrop {
   position: absolute;
