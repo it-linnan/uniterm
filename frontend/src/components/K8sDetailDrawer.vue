@@ -18,7 +18,11 @@
           <div class="detail-section-title">{{ sec.label }}</div>
           <div v-for="f in sec.fields" :key="f.label" class="detail-row">
             <span class="detail-label">{{ f.label }}</span>
-            <span class="detail-value">{{ fieldText(f) }}</span>
+            <div v-if="f.label === 'Labels'" class="detail-value k8s-labels">
+              <span v-for="(value, key) in target?.metadata?.labels || {}" :key="key" class="k8s-label-chip">{{ key }}={{ value }}</span>
+              <span v-if="!Object.keys(target?.metadata?.labels || {}).length">—</span>
+            </div>
+            <span v-else class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
         <!-- Pod events (async) -->
@@ -314,6 +318,9 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.k8s-labels { display: flex; flex-wrap: wrap; gap: 0.375rem; min-width: 0; }
+.k8s-label-chip { max-width: 100%; padding: 0.2rem 0.375rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-hover); overflow-wrap: anywhere; word-break: normal; }
+
 /* Copied verbatim from MonitorTabContent.vue */
 .detail-drawer-backdrop {
   position: absolute;
