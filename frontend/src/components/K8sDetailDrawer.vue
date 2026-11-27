@@ -21,6 +21,29 @@
             <span class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
+        <div v-if="resourceKey === 'configmaps'" class="detail-section">
+          <div class="detail-section-title">Data ({{ configEntries.length }})</div>
+          <template v-for="entry in configEntries" :key="entry.key">
+            <div v-if="!entry.multiline" class="detail-row">
+              <span class="detail-label config-key">{{ entry.key }}</span>
+              <span class="detail-value">{{ entry.value === '' ? '—' : entry.value }}</span>
+            </div>
+            <details v-else class="config-entry" @toggle="onConfigToggle(entry.key, $event)">
+              <summary class="config-key">{{ entry.key }}</summary>
+              <div v-if="expandedConfig.has(entry.key)" class="config-preview">
+                <SyntaxEditor :model-value="entry.value" :file-path="entry.key" :lang="entry.lang" readonly compact />
+              </div>
+            </details>
+          </template>
+          <div v-if="!configEntries.length" class="detail-row"><span class="detail-value">—</span></div>
+          <template v-if="Object.keys(target?.binaryData || {}).length">
+            <div class="detail-section-title">binaryData (Base64)</div>
+            <details v-for="(value, key) in target.binaryData" :key="key" class="config-entry">
+              <summary class="config-key">{{ key }}</summary>
+              <pre class="config-binary">{{ value }}</pre>
+            </details>
+          </template>
+        </div>
         <!-- Pod events (async) -->
         <div v-if="isPod" class="detail-section">
           <div class="detail-section-title">Events</div>
@@ -44,8 +67,8 @@
             <el-button size="small" @click="cancelEdit">{{ t('common.cancel') }}</el-button>
           </template>
         </div>
-        <pre v-if="!editing" class="k8s-yaml-drawer-body" @contextmenu="onCopyContextMenu">{{ yamlText }}</pre>
-        <SyntaxEditor v-else v-model="draft" lang="yaml" compact />
+        <SyntaxEditor v-if="!editing && tab === 'yaml'" :model-value="yamlText" lang="yaml" readonly compact />
+        <SyntaxEditor v-else-if="editing" v-model="draft" lang="yaml" compact />
         <div v-if="saveError" class="yaml-error">{{ saveError }}</div>
       </div>
     </template>
@@ -87,7 +110,7 @@ import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { ElButton, ElIcon, ElMessage, ElSelect, ElOption, ElCheckbox } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
 import { dump, load } from 'js-yaml'
-import { getResource, genericDetailSections, type DetailSection } from '../services/k8sResources'
+import { getResource, genericDetailSections, configMapEntries, type DetailSection } from '../services/k8sResources'
 import { requestJSON, startLogStream, type LogHandle } from '../services/k8sClient'
 import { useI18n } from '../i18n'
 import Menu from './Menu.vue'
@@ -159,10 +182,18 @@ const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const saveError = ref('')
+const expandedConfig = ref(new Set<string>())
+const configEntries = computed(() => configMapEntries(props.target?.data))
+
+function onConfigToggle(key: string, event: Event) {
+  if ((event.target as HTMLDetailsElement).open) expandedConfig.value.add(key)
+  else expandedConfig.value.delete(key)
+}
 
 watch(() => props.target, () => {
   tab.value = props.initialTab === 'yaml' ? 'yaml' : 'struct'
   editing.value = false; saveError.value = ''
+  expandedConfig.value = new Set()
   events.value = []; eventsError.value = ''
   if (isPod.value) loadEvents()
 })
@@ -175,7 +206,8 @@ const headerTitle = computed(() => {
 
 const sections = computed<DetailSection[]>(() => {
   const desc = getResource(props.resourceKey)
-  if (desc?.detailSections?.length) return desc.detailSections
+  if (desc?.detailSections?.length) return props.resourceKey === 'configmaps'
+    ? desc.detailSections.filter(s => s.label !== 'Data') : desc.detailSections
   return genericDetailSections()
 })
 
@@ -314,6 +346,13 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.config-key { overflow-wrap: anywhere; user-select: text; }
+.detail-label.config-key { width: 40%; min-width: 0; }
+.config-entry { margin: 0.5rem 0; padding: 0.5rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.config-entry summary { cursor: pointer; font-family: var(--font-mono); }
+.config-preview { height: 16rem; margin-top: 0.5rem; }
+.config-binary { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; user-select: text; }
+
 /* Copied verbatim from MonitorTabContent.vue */
 .detail-drawer-backdrop {
   position: absolute;
