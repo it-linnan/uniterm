@@ -1,5 +1,4 @@
 import { RESOURCES } from './k8sResources'
-import { requestJSON } from './k8sClient'
 
 export interface ResourceRef { kind: string; name: string; namespace?: string; apiVersion?: string; uid?: string }
 export function resourceLocation(ref: ResourceRef) {
@@ -43,6 +42,7 @@ export function relatedResources(obj: any, kind: string): { label: string; ref: 
   return out
 }
 export async function listRelated(connId: string, path: string): Promise<any[]> {
+  const { requestJSON } = await import('./k8sClient')
   let token = ''
   const items: any[] = []
   do {
