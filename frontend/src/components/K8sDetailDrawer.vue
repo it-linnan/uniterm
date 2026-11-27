@@ -40,13 +40,18 @@
               </template>
             </div>
             <details v-else class="config-entry" :open="expandedConfig.has(entry.key)" @toggle="onConfigToggle(entry.key, $event)">
-              <summary class="config-key" @click="isEditingKey(entry.key) && $event.preventDefault()">{{ entry.key }}
-                <el-button v-if="!target?.immutable && !isEditingKey(entry.key)" link size="small" class="config-edit-button"
-                  :disabled="keyEditVisible || editing || saving" @click.stop.prevent="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
+              <summary class="config-key config-entry-header" @click="isEditingKey(entry.key) && $event.preventDefault()">
+                <span class="config-entry-name">{{ entry.key }}</span>
+                <span class="config-header-actions">
+                  <span v-if="isEditingKey(entry.key) && keyEditLang === 'conf'" class="config-edit-encoding">{{ keyEditRaw ? 'Raw' : 'Unicode' }}</span>
+                  <el-button v-if="expandedConfig.has(entry.key) && !isEditingKey(entry.key) && entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value"
+                    link size="small" @click.stop.prevent="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
+                  <el-button v-if="!target?.immutable && !isEditingKey(entry.key)" link size="small"
+                    :disabled="keyEditVisible || editing || saving" @click.stop.prevent="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
+                </span>
               </summary>
               <div v-if="expandedConfig.has(entry.key)">
                 <template v-if="isEditingKey(entry.key)">
-                  <div v-if="keyEditLang === 'conf'" class="config-edit-encoding">{{ keyEditRaw ? 'Raw' : 'Unicode' }}</div>
                   <div class="config-preview">
                     <SyntaxEditor :ref="setKeyEditor" v-model="keyEditDraft" :file-path="keyEditName" :lang="keyEditLang"
                       compact show-search-button :readonly="keySaving" />
@@ -58,9 +63,6 @@
                 <div v-if="keySaveError" class="yaml-error">{{ keySaveError }}</div>
                 </template>
                 <template v-else>
-                  <div v-if="entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value" class="config-preview-toolbar">
-                    <el-button size="small" @click="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
-                  </div>
                   <div class="config-preview">
                     <SyntaxEditor :model-value="entry.lang === 'conf' && !rawProperties.has(entry.key) ? decodePropertiesUnicode(entry.value) : entry.value"
                       :file-path="entry.key" :lang="entry.lang" readonly compact show-search-button />
@@ -480,14 +482,19 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
-.config-edit-button { float: right; margin-right: 0.25rem; }
+.config-entry-header { display: flex; align-items: center; gap: 0.5rem; list-style: none; }
+.config-entry-header::-webkit-details-marker { display: none; }
+.config-entry-header::before { content: ''; flex: none; width: 0.375rem; height: 0.375rem; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); margin-inline: 0.125rem; }
+.config-entry[open] > .config-entry-header::before { transform: rotate(45deg); }
+.config-entry-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.config-header-actions { display: inline-flex; align-items: center; flex: none; gap: 0.75rem; font-family: var(--font-ui); }
+.config-header-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .config-inline-edit { min-width: 0; }
 .config-edit-actions { display: flex; justify-content: flex-end; gap: 0.25rem; margin-top: 0.5rem; }
 .config-edit-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .db-tab:disabled { opacity: 0.5; cursor: not-allowed; }
-.config-edit-encoding { color: var(--text-muted); font-size: 0.75rem; margin-bottom: 0.375rem; }
+.config-edit-encoding { color: var(--text-muted); font-size: 0.75rem; }
 
-.config-preview-toolbar { display: flex; justify-content: flex-end; margin-top: 0.375rem; }
 
 .config-key { overflow-wrap: anywhere; user-select: text; }
 .detail-label.config-key { width: 40%; min-width: 0; }
