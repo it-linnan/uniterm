@@ -82,8 +82,13 @@
             </div>
             <details v-else class="config-entry" @toggle="onConfigToggle(entry.key, $event)">
               <summary class="config-key">{{ entry.key }}</summary>
-              <div v-if="expandedConfig.has(entry.key)" class="config-preview">
-                <SyntaxEditor :model-value="entry.value" :file-path="entry.key" :lang="entry.lang" readonly compact selection-copy-menu @selection-contextmenu="onEditorCopyContextMenu" />
+              <div v-if="expandedConfig.has(entry.key)">
+                <div v-if="entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value" class="config-preview-toolbar">
+                  <el-button size="small" @click="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
+                </div>
+                <div class="config-preview">
+                <SyntaxEditor :model-value="entry.lang === 'conf' && !rawProperties.has(entry.key) ? decodePropertiesUnicode(entry.value) : entry.value" :file-path="entry.key" :lang="entry.lang" readonly compact show-search-button selection-copy-menu @selection-contextmenu="onEditorCopyContextMenu" />
+                </div>
               </div>
             </details>
           </template>
@@ -167,6 +172,7 @@ import { requestJSON, startLogStream, type LogHandle } from '../services/k8sClie
 import { useI18n } from '../i18n'
 import Menu from './Menu.vue'
 import SyntaxEditor from './SyntaxEditor.vue'
+import { decodePropertiesUnicode } from '../services/propertiesPreview'
 import { writeClipboard } from '../composables/useClipboardWrite'
 import MenuItem from './MenuItem.vue'
 
@@ -258,6 +264,11 @@ const draft = ref('')
 const saving = ref(false)
 const saveError = ref('')
 const expandedConfig = ref(new Set<string>())
+const rawProperties = ref(new Set<string>())
+function toggleRawProperties(key: string) {
+  if (rawProperties.value.has(key)) rawProperties.value.delete(key)
+  else rawProperties.value.add(key)
+}
 const configEntries = computed(() => configMapEntries(props.target?.data))
 
 function onConfigToggle(key: string, event: Event) {
@@ -269,6 +280,7 @@ watch(() => props.target, () => {
   tab.value = props.initialTab === 'yaml' ? 'yaml' : 'struct'
   editing.value = false; saveError.value = ''
   expandedConfig.value = new Set()
+  rawProperties.value = new Set()
   events.value = []; eventsError.value = ''
   if (isPod.value) loadEvents()
 })
@@ -466,6 +478,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.config-preview-toolbar { display: flex; justify-content: flex-end; margin-top: 0.375rem; }
+
 .detail-value.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
 .k8s-condition + .k8s-condition { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
 .k8s-condition-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem; }
