@@ -31,9 +31,11 @@
           <K8sBreadcrumb
             :stack="navStack"
             :namespace="currentNamespace"
+            :namespaces="selectedNamespaces"
             :namespace-options="namespaceOptions"
             @pop="popTo"
             @update:namespace="setNamespace"
+            @update:namespaces="setNamespaces"
           >
             <template #toggle>
               <button
@@ -117,6 +119,7 @@ import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
 import { parseCRD, crdListPath } from '../services/k8sCrd'
 import { resourceLocation, type ResourceRef } from '../services/k8sRelations'
+import { getResource } from '../services/k8sResources'
 import type { K8sTab, NavFrame } from '../types/k8s'
 import type { ConnectionConfig } from '../types/session'
 
@@ -145,6 +148,7 @@ const namespaceOptions = computed(() => {
   const set = new Set<string>()
   for (const n of fetchedNamespaces.value) set.add(n)
   if (initialNamespace.value) set.add(initialNamespace.value)
+  for (const ns of selectedNamespaces.value) set.add(ns)
   return Array.from(set).sort()
 })
 
@@ -166,6 +170,15 @@ async function loadNamespaces() {
 }
 
 // ── nav stack ──────────────────────────────────────────────────
+const nsPreferenceKey='uniterm:k8s-namespaces:'+props.connection.id
+function readNamespaces():string[]{try{const v=JSON.parse(localStorage.getItem(nsPreferenceKey)||'null');if(Array.isArray(v))return v.filter(x=>typeof x==='string'&&x)}catch{}return props.tab.namespace?[props.tab.namespace]:[]}
+const selectedNamespaces=ref<string[]>(readNamespaces())
+function setNamespaces(values:string[]){
+  selectedNamespaces.value=[...new Set(values.filter(Boolean))]
+  try{localStorage.setItem(nsPreferenceKey,JSON.stringify(selectedNamespaces.value))}catch{}
+  const f=topFrame.value
+  if(f.kind==='list')navStack.value=[{...f,namespace:selectedNamespaces.value.length===1?selectedNamespaces.value[0]:'',namespaces:selectedNamespaces.value.slice()}]
+}
 const navStack = ref<NavFrame[]>([{ kind: 'overview' }])
 const topFrame = computed(() => navStack.value[navStack.value.length - 1])
 const rootResourceKey = computed(() => {
@@ -185,7 +198,8 @@ function selectResource(key: string, nameFilter?: string) {
     navStack.value = [{ kind: 'overview' }]
     return
   }
-  navStack.value = [{ kind: 'list', resourceKey: key, namespace: currentNamespace.value, nameFilter: nameFilter || undefined }]
+  const namespaces=getResource(key)?.namespaced?selectedNamespaces.value.slice():[]
+  navStack.value = [{ kind: 'list', resourceKey: key, namespace: namespaces.length===1?namespaces[0]:'', namespaces, nameFilter: nameFilter || undefined }]
 }
 function popTo(index: number) {
   navStack.value = navStack.value.slice(0, index + 1)

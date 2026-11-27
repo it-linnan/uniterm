@@ -12,8 +12,16 @@
       <el-button size="small" :icon="Refresh" @click="onRefresh" />
 
       <el-button v-if="isNamespaceList" size="small" type="primary" @click="onNewNamespace">{{ t('k8s.newNamespace') }}</el-button>
-      <el-button v-else-if="frame.kind === 'custom' || desc?.canCreate" size="small" type="primary" :icon="Plus" @click="onCreate" />
+      <el-button v-else-if="frame.kind === 'custom' || desc?.canCreate" :disabled="scopes.length>1" size="small" type="primary" :icon="Plus" @click="onCreate" />
 
+      <el-popover v-if="desc" trigger="click" placement="bottom-start" :width="260">
+        <template #reference><el-button size="small">Columns</el-button></template>
+        <div v-for="(col,i) in orderedColumns" :key="col.header" class="column-pref-row">
+          <el-checkbox :model-value="!prefs.hidden.includes(col.header)" :disabled="col.header==='Name'" @change="v=>toggleColumn(col.header,!!v)">{{ col.header }}</el-checkbox>
+          <button :disabled="i===0" @click="moveColumn(i,-1)">↑</button><button :disabled="i===orderedColumns.length-1" @click="moveColumn(i,1)">↓</button>
+        </div>
+        <el-button size="small" link @click="resetPreferences">Reset defaults</el-button>
+      </el-popover>
       <span class="k8s-list-title">
         {{ titleLabel }} ({{ displayCount }})
       </span>
@@ -31,6 +39,7 @@
       border
       v-loading="isLoading"
       @row-click="r => emit('open-detail', r)"
+      @row-contextmenu="onRowContextMenu"
     >
       <el-table-column label="Name" show-overflow-tooltip><template #default="{ row }">{{ row.metadata?.name }}</template></el-table-column>
       <el-table-column v-for="pc in frame.crd.printerColumns" :key="pc.name" :label="pc.name" show-overflow-tooltip>
@@ -60,16 +69,25 @@
       v-loading="isLoading"
       :row-class-name="rowClassName"
       @row-click="onRowClick"
+      @row-contextmenu="onRowContextMenu"
+      @header-dragend="rememberWidth"
+      @sort-change="rememberSort"
+      @filter-change="rememberFilters"
+      :key="tableKey"
+      :default-sort="prefs.sort.order ? {prop:prefs.sort.header,order:prefs.sort.order} : undefined"
     >
       <el-table-column
-        v-for="col in desc?.columns || []"
+        v-for="col in visibleColumns"
         :key="col.header"
         :label="col.header"
-        :width="col.width ? uiPx(col.width) : undefined"
+        :width="prefs.widths[col.header] || (col.width ? uiPx(col.width) : undefined)"
+        :prop="col.header"
+        :column-key="col.header"
         sortable
         show-overflow-tooltip
         :sort-method="(a, b) => compareCells(col, a, b)"
         :filters="col.filterable ? enumFilters(col) : undefined"
+        :filtered-value="prefs.filters[col.header] || []"
         :filter-method="col.filterable ? (val, row) => cellText(col.value(row, usageOf(row))) === val : undefined"
       >
         <template #default="{ row }">
@@ -100,6 +118,9 @@
       </el-table-column>
     </el-table>
 
+    <Menu ref="copyMenu" v-model:visible="copyMenuVisible">
+      <MenuItem v-for="item in copyItems" :key="item.label" @click="copyItem(item.value)">{{ item.label }}</MenuItem>
+    </Menu>
     <K8sCreateDialog
       v-model="createVisible"
       :title="createTitle"
@@ -116,7 +137,7 @@ import { computed, ref, watch, onBeforeUnmount, h } from 'vue'
 import { uiPx } from '../utils/uiScale'
 import {
   ElTable, ElTableColumn, ElInput, ElButton,
-  ElMessageBox, ElMessage, ElCheckbox,
+  ElMessageBox, ElMessage, ElCheckbox, ElPopover,
 } from 'element-plus'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import {
@@ -126,6 +147,9 @@ import { useI18n } from '../i18n'
 import K8sCreateDialog from './K8sCreateDialog.vue'
 import { getResource, age, ingressRuleLinks, type ColoredCell } from '../services/k8sResources'
 import { openExternalUrl } from '../services/webSftpBridge'
+import { writeClipboard } from '../composables/useClipboardWrite'
+import Menu from './Menu.vue'
+import MenuItem from './MenuItem.vue'
 import { fetchPodMetrics, fetchNodeMetrics, type Usage } from '../services/k8sMetrics'
 import { requestJSON } from '../services/k8sClient'
 import { crdListPath, evalJsonPath } from '../services/k8sCrd'
@@ -154,13 +178,34 @@ const isLoading = computed(() => {
   const f = props.frame
   if (f.kind === 'custom') return crdLoading.value
   if (f.kind === 'owned') return store.isLoading(props.connId, 'pods', f.namespace)
-  return store.isLoading(props.connId, f.resourceKey, f.namespace)
+  return scopes.value.some(ns=>store.isLoading(props.connId, f.resourceKey, ns))
 })
 
 const resourceKey = computed(() => props.frame.kind === 'custom' ? '__crd__' : props.frame.resourceKey)
 const desc = computed(() => props.frame.kind === 'custom' ? undefined : getResource(props.frame.resourceKey))
 const localNs = computed(() => props.frame.namespace || '')
-const filter = ref(props.frame.kind === 'list' ? (props.frame.nameFilter || '') : '')
+const scopes=computed(()=>props.frame.kind==='list'&&desc.value?.namespaced&&props.frame.namespaces?.length?props.frame.namespaces:[localNs.value])
+interface ListPreferences {hidden:string[];order:string[];widths:Record<string,number>;search:string;sort:{header:string;order:'ascending'|'descending'|null};filters:Record<string,string[]>}
+function defaults():ListPreferences{return {hidden:[],order:[],widths:{},search:'',sort:{header:'',order:null},filters:{}}}
+const preferenceKey=computed(()=>'uniterm:k8s-list:'+resourceKey.value)
+function readPreferences():ListPreferences{try{const v=JSON.parse(localStorage.getItem(preferenceKey.value)||'null');if(v&&Array.isArray(v.hidden)&&Array.isArray(v.order))return {...defaults(),...v}}catch{}return defaults()}
+const prefs=ref<ListPreferences>(readPreferences())
+const tableKey=ref(0)
+const filter = ref(props.frame.kind === 'list' ? (props.frame.nameFilter || prefs.value.search) : '')
+function persist(){try{localStorage.setItem(preferenceKey.value,JSON.stringify(prefs.value))}catch{}}
+const orderedColumns=computed(()=>{const cols=desc.value?.columns||[];const order=prefs.value.order;return cols.slice().sort((a,b)=>{const x=order.indexOf(a.header),y=order.indexOf(b.header);return (x<0?cols.length+cols.indexOf(a):x)-(y<0?cols.length+cols.indexOf(b):y)})})
+const visibleColumns=computed(()=>orderedColumns.value.filter(c=>c.header==='Name'||!prefs.value.hidden.includes(c.header)))
+function toggleColumn(header:string,visible:boolean){if(header==='Name')return;prefs.value.hidden=visible?prefs.value.hidden.filter(x=>x!==header):[...new Set([...prefs.value.hidden,header])];if(!visible){delete prefs.value.filters[header];if(prefs.value.sort.header===header)prefs.value.sort={header:'',order:null}}persist();tableKey.value++}
+function moveColumn(i:number,delta:number){const order=orderedColumns.value.map(c=>c.header);if(i+delta<0||i+delta>=order.length)return;[order[i],order[i+delta]]=[order[i+delta],order[i]];prefs.value.order=order;persist();tableKey.value++}
+function rememberWidth(width:number,_old:number,col:any){if(col?.property&&width>0){prefs.value.widths[col.property]=width;persist()}}
+function rememberSort(e:any){prefs.value.sort={header:e.prop||'',order:e.order||null};persist()}
+function rememberFilters(values:Record<string,string[]>){prefs.value.filters={...prefs.value.filters,...values};persist()}
+function resetPreferences(){prefs.value=defaults();filter.value='';persist();tableKey.value++}
+watch(filter,v=>{if(props.frame.kind!=='custom'){prefs.value.search=v;persist()}})
+const copyMenu=ref<InstanceType<typeof Menu>|null>(null),copyMenuVisible=ref(false)
+const copyItems=ref<{label:string;value:string}[]>([])
+function onRowContextMenu(row:any,_col:any,event:MouseEvent){event.preventDefault();event.stopPropagation();const name=row.metadata?.name||'',ns=row.metadata?.namespace||'',kind=row.kind||desc.value?.kind||'Resource';const values=[{label:'Copy name',value:name},{label:'Copy namespace',value:ns},{label:'Copy resource identifier',value:[kind,ns,name].filter(Boolean).join('/')},{label:'Copy IP',value:row.status?.podIP||row.spec?.clusterIP||''},...(resourceKey.value==='ingresses'?ingressRuleLinks(row).filter(r=>r.url).map(r=>({label:'Copy '+r.text,value:r.url!})):[]),...(row.spec?.containers||row.spec?.template?.spec?.containers||[]).map((c:any)=>({label:'Copy image: '+c.name,value:c.image||''}))];copyItems.value=values.filter(x=>x.value);if(copyItems.value.length)copyMenu.value?.openAt(event.clientX,event.clientY)}
+async function copyItem(value:string){copyMenuVisible.value=false;if(await writeClipboard(value))ElMessage.success(t('k8s.copied'));else ElMessage.error(t('k8s.copyFailed'))}
 
 const isNamespaceList = computed(() => props.frame.kind === 'list' && props.frame.resourceKey === 'namespaces')
 const isCrdList = computed(() => props.frame.kind === 'list' && props.frame.resourceKey === 'customresourcedefinitions')
@@ -179,14 +224,14 @@ const items = computed<any[]>(() => {
     const rs = f.ownerKind === 'Deployment' ? store.getItems(props.connId, 'replicasets', f.namespace) : []
     return podsOfOwner(pods, { uid: f.ownerUid, kind: f.ownerKind }, rs)
   }
-  return store.getItems(props.connId, f.resourceKey, f.namespace)
+  return scopes.value.flatMap(ns=>store.getItems(props.connId, f.resourceKey, ns))
 })
 
 const listError = computed(() => {
   const f = props.frame
   if (f.kind === 'custom') return crdError.value
   if (f.kind === 'owned') return store.getError(props.connId, 'pods', f.namespace)
-  return store.getError(props.connId, f.resourceKey, f.namespace)
+  return scopes.value.map(ns=>{const err=store.getError(props.connId,f.resourceKey,ns);return err?(ns?ns+': ':'')+err:''}).filter(Boolean).join('; ')
 })
 
 // CRD 类资源（如 Gateway API）在未安装的集群上列表 404，翻译成人话
@@ -480,7 +525,7 @@ async function pollMetrics() {
   if (!props.connId || !desc.value?.metrics) return
   try {
     metricsMap.value = desc.value.metrics === 'pod'
-      ? await fetchPodMetrics(props.connId, localNs.value)
+      ? new Map((await Promise.all(scopes.value.map(ns=>fetchPodMetrics(props.connId,ns).catch(()=>new Map<string,Usage>())))).flatMap(m=>Array.from(m?.entries()||[])))
       : await fetchNodeMetrics(props.connId)
   } catch { metricsMap.value = null }
 }
@@ -514,7 +559,7 @@ function subsFor(f: NavFrame): { res: string; ns: string }[] {
     if (f.ownerKind === 'Deployment') arr.push({ res: 'replicasets', ns: f.namespace })
     return arr
   }
-  return [{ res: f.resourceKey, ns: f.namespace }]
+  return f.namespaces?.length && getResource(f.resourceKey)?.namespaced ? f.namespaces.map(ns=>({res:f.resourceKey,ns})) : [{ res: f.resourceKey, ns: f.namespace }]
 }
 
 async function loadCrd() {
@@ -542,7 +587,9 @@ async function applySubs() {
 
 watch(() => props.frame, async () => {
   // frame 变化即视为打开新列表：按 nameFilter 预填过滤词（无则清空）
-  filter.value = props.frame.kind === 'list' ? (props.frame.nameFilter || '') : ''
+  prefs.value=readPreferences()
+  filter.value = props.frame.kind === 'list' ? (props.frame.nameFilter || prefs.value.search) : ''
+  tableKey.value++
   if (props.connId) await applySubs()
 })
 
@@ -562,6 +609,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.column-pref-row{display:flex;align-items:center;gap:.375rem}.column-pref-row :deep(.el-checkbox){flex:1}.column-pref-row button{background:transparent;color:var(--text-secondary);border:1px solid var(--border-subtle);border-radius:3px;cursor:pointer}.column-pref-row button:disabled{opacity:.35}
 .ingress-rule { overflow-wrap: anywhere; white-space: normal; }
 .ingress-rule a { color: var(--accent); }
 .ingress-rule a:hover { text-decoration: underline; }

@@ -1,8 +1,13 @@
 <template>
   <div class="db-breadcrumb">
     <slot name="toggle" />
+    <el-select v-if="showMultiNs" :model-value="namespaces" multiple collapse-tags collapse-tags-tooltip
+      size="small" class="k8s-ns-select" placeholder="all namespaces" filterable allow-create default-first-option clearable
+      @update:model-value="v => $emit('update:namespaces', v || [])">
+      <el-option v-for="opt in namespaceOptions" :key="opt" :label="opt" :value="opt" />
+    </el-select>
     <el-select
-      v-if="showNsSelect"
+      v-else-if="showNsSelect"
       :model-value="namespace"
       size="small"
       class="k8s-ns-select"
@@ -34,9 +39,10 @@ import { ElSelect, ElOption } from 'element-plus'
 import { getResource } from '../services/k8sResources'
 import type { NavFrame } from '../types/k8s'
 
-const props = defineProps<{ stack: NavFrame[]; namespace: string; namespaceOptions: string[] }>()
-defineEmits<{ (e: 'pop', index: number): void; (e: 'update:namespace', ns: string): void }>()
+const props = defineProps<{ stack: NavFrame[]; namespace: string; namespaces: string[]; namespaceOptions: string[] }>()
+defineEmits<{ (e: 'pop', index: number): void; (e: 'update:namespace', ns: string): void; (e:'update:namespaces', ns:string[]):void }>()
 
+const showMultiNs=computed(()=>{const top=props.stack[props.stack.length-1];return top?.kind==='list' && !!getResource(top.resourceKey)?.namespaced})
 const showNsSelect = computed(() => {
   const top = props.stack[props.stack.length - 1]
   if (!top) return false

@@ -42,6 +42,6 @@ export const OVERVIEW_KEY = '__overview__'
 
 export type NavFrame =
   | { kind: 'overview' }
-  | { kind: 'list'; resourceKey: string; namespace: string; nameFilter?: string }
+  | { kind: 'list'; resourceKey: string; namespace: string; namespaces?: string[]; nameFilter?: string }
   | { kind: 'owned'; resourceKey: string; ownerKind: string; ownerName: string; ownerUid: string; namespace: string }
   | { kind: 'custom'; crd: ParsedCRD; namespace: string }
