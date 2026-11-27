@@ -8,6 +8,9 @@
     <!-- Custom search/replace bar: the built-in CodeMirror panel's look
          doesn't match the app, so search state/highlighting is managed here
          and the cursor work goes through RegExpCursor. -->
+    <button v-if="props.showSearchButton && !searchOpen" class="search-icon-btn editor-search-toggle" :title="t('sftp.edit.search')" @click="openSearch()">
+      <el-icon><Search :size="'0.875rem'" /></el-icon>
+    </button>
     <div v-if="searchOpen" class="search-bar" @keydown="onSearchBarKeydown">
       <div class="search-row">
         <button class="search-icon-btn" :class="{ active: caseSensitive }" :title="t('sftp.edit.matchCase')" @click="caseSensitive = !caseSensitive">
@@ -42,6 +45,7 @@
         </button>
         <button
           class="search-icon-btn"
+          v-if="!props.readonly"
           :class="{ active: replaceRowOpen }"
           :title="t('sftp.edit.replace')"
           @click="replaceRowOpen = !replaceRowOpen; nextTick(() => (replaceRowOpen ? replaceInputRef?.focus() : searchInputRef?.focus()))"
@@ -52,7 +56,7 @@
           <el-icon><X :size="'0.875rem'" /></el-icon>
         </button>
       </div>
-      <div v-if="replaceRowOpen" class="search-row">
+      <div v-if="replaceRowOpen && !props.readonly" class="search-row">
         <span class="replace-spacer" />
         <el-input
           ref="replaceInputRef"
@@ -85,8 +89,8 @@ import { RegExpCursor } from '@codemirror/search'
 import { Clipboard } from '@wailsio/runtime'
 import { writeClipboard } from '../composables/useClipboardWrite'
 import { useI18n } from '../i18n'
-import { CaseSensitive, ChevronDown, ChevronUp, ChevronsDownUp, Regex, Replace, ReplaceAll, WholeWord, X } from '@lucide/vue'
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, foldKeymap, StreamLanguage } from '@codemirror/language'
+import { CaseSensitive, ChevronDown, ChevronUp, ChevronsDownUp, Regex, Replace, ReplaceAll, Search, WholeWord, X } from '@lucide/vue'
+import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, foldKeymap, foldService, StreamLanguage } from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { json } from '@codemirror/lang-json'
 import { javascript } from '@codemirror/lang-javascript'
@@ -99,6 +103,7 @@ import { sql } from '@codemirror/lang-sql'
 import { yaml } from '@codemirror/lang-yaml'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { properties } from '@codemirror/legacy-modes/mode/properties'
+import { propertiesFoldRange } from '../services/propertiesPreview'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
 import { nginx } from '@codemirror/legacy-modes/mode/nginx'
@@ -122,6 +127,8 @@ const props = withDefaults(defineProps<{
   lang?: string
   wrap?: boolean
   readonly?: boolean
+  showSearchButton?: boolean
+  selectionCopyMenu?: boolean
   fontSize?: number
 }>(), { wrap: true })
 
@@ -129,6 +136,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   execute: []
   'search-open': [open: boolean]
+  'selection-contextmenu': [event: MouseEvent, text: string]
 }>()
 
 const hostRef = ref<HTMLElement | null>(null)
@@ -300,7 +308,7 @@ function computeReplacement(matched: string): string {
 }
 
 function replaceCurrent() {
-  if (!view || currentIdx < 0 || !searchRanges[currentIdx]) return
+  if (!view || props.readonly || currentIdx < 0 || !searchRanges[currentIdx]) return
   const r = searchRanges[currentIdx]
   const insert = computeReplacement(view.state.sliceDoc(r.from, r.to))
   view.dispatch({
@@ -311,7 +319,7 @@ function replaceCurrent() {
 }
 
 function replaceAllMatches() {
-  if (!view || !searchRanges.length || !currentSpec) return
+  if (!view || props.readonly || !searchRanges.length || !currentSpec) return
   const spec = currentSpec
   try {
     const re = new RegExp(buildSource(spec), spec.caseSensitive ? 'g' : 'gi')
@@ -332,7 +340,8 @@ function replaceAllMatches() {
 
 async function openSearch(replace = false) {
   searchOpen.value = true
-  if (replace) replaceRowOpen.value = true
+  if (props.readonly) replaceRowOpen.value = false
+  else if (replace) replaceRowOpen.value = true
   emit('search-open', true)
   // Re-scan even when the query text didn't change: closeSearch cleared the
   // decorations, and the query watcher only fires on actual changes.
@@ -555,6 +564,8 @@ function buildExtensions(path: string) {
     // query itself is managed by the Vue search bar above the editor).
     searchDecoField,
     foldGutter(),
+    ...(props.lang === 'conf' || (!props.lang && extOf(path) === 'properties')
+      ? [foldService.of((state, start) => propertiesFoldRange(state.doc, start))] : []),
     bracketMatching(),
     // Dark: One Dark tokens; light: defaultHighlightStyle (light-tuned) takes
     // over as the active highlighter via the fallback chain.
@@ -562,8 +573,34 @@ function buildExtensions(path: string) {
     ...(isDark.value ? [oneDark] : []),
     EditorState.readOnly.of(!!props.readonly),
     EditorView.editable.of(!props.readonly),
+    ...(props.readonly ? [EditorView.contentAttributes.of({ tabindex: '0' })] : []),
     props.lang ? languageFor(props.lang) : languageExtension(path),
+    EditorView.domEventHandlers({
+      copy(event) {
+        if (!view || view.state.selection.main.empty) return false
+        event.preventDefault()
+        void copySelection()
+        return true
+      },
+      contextmenu(event) {
+        if (!props.selectionCopyMenu || !view || view.state.selection.main.empty) return false
+        const { from, to } = view.state.selection.main
+        event.preventDefault()
+        event.stopPropagation()
+        emit('selection-contextmenu', event, view.state.sliceDoc(from, to))
+        return true
+      },
+    }),
     keymap.of([
+      {
+        key: 'Mod-c',
+        stopPropagation: true,
+        run: () => {
+          if (!view || view.state.selection.main.empty) return false
+          void copySelection()
+          return true
+        },
+      },
       {
         key: 'Mod-Enter',
         run: () => {
@@ -758,6 +795,8 @@ defineExpose({
 </script>
 
 <style scoped>
+.editor-search-toggle { position: absolute; top: 0.25rem; right: 0.5rem; z-index: 10; background: var(--bg-base); }
+
 .syntax-editor {
   position: relative;
   width: 100%;
