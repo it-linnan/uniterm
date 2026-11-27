@@ -38,6 +38,7 @@
             @update:namespaces="setNamespaces"
           >
             <template #toggle>
+              <el-button size="small" link @click="forwardVisible=true">Port forwards</el-button>
               <button
                 class="btn btn-ghost btn-icon btn-sm m-tree-toggle"
                 :title="treeOpen ? t('common.collapse') : t('common.expand')"
@@ -77,6 +78,9 @@
       </template>
     </Menu>
 
+    <el-dialog v-model="forwardVisible" title="Port forwards" width="min(50rem, 95vw)" destroy-on-close>
+      <K8sPortForward v-if="forwardVisible" :conn-id="connId" manager-only />
+    </el-dialog>
     <K8sDetailDrawer
       :conn-id="connId"
       :mode="drawerMode"
@@ -102,7 +106,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { PanelLeft } from '@lucide/vue'
 import { isNarrowScreen } from '../utils/platform'
 import { useI18n } from '../i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElButton, ElDialog } from 'element-plus'
+import K8sPortForward from './K8sPortForward.vue'
 import * as k8sClient from '../services/k8sClient'
 import { usePanelStore } from '../stores/panelStore'
 import { useTabStore } from '../stores/tabStore'
@@ -135,6 +140,7 @@ const sessionStore = useSessionStore()
 const k8sStore = useK8sStore()
 
 const connId = ref<string>('')
+const forwardVisible=ref(false)
 const error = ref('')
 const initialNamespace = ref<string>(props.tab.namespace || '')
 

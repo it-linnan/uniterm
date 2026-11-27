@@ -136,6 +136,8 @@
         <K8sRelatedDetails :conn-id="connId" :resource-key="resourceKey" :target="target"
           @navigate="navigateRelated" @logs="(name, previous) => $emit('container-logs', name, previous)" @terminal="name => $emit('container-terminal', name)" />
         <K8sSecretDetails v-if="resourceKey === 'secrets'" :conn-id="connId" :target="target" @saved="onSecretSaved" />
+        <K8sNodeDetails v-if="resourceKey === 'nodes'" :conn-id="connId" :target="target" @navigate="navigateRelated" />
+        <K8sPortForward v-if="['pods','services'].includes(resourceKey)" :conn-id="connId" :target="target" :resource-key="resourceKey" />
         <K8sDiagnostics :conn-id="connId" :target="target" :resource-key="resourceKey" @navigate="navigateRelated" />
       </div>
 
@@ -203,6 +205,8 @@ import { writeClipboard } from '../composables/useClipboardWrite'
 import MenuItem from './MenuItem.vue'
 import K8sRelatedDetails from './K8sRelatedDetails.vue'
 import K8sDiagnostics from './K8sDiagnostics.vue'
+import K8sNodeDetails from './K8sNodeDetails.vue'
+import K8sPortForward from './K8sPortForward.vue'
 import K8sSecretDetails from './K8sSecretDetails.vue'
 import { podContainers, type ResourceRef } from '../services/k8sRelations'
 
