@@ -79,9 +79,12 @@
             <div v-if="!entry.multiline" class="detail-row">
               <span class="detail-label config-key">{{ entry.key }}</span>
               <span class="detail-value">{{ entry.value === '' ? '—' : entry.value }}</span>
+              <el-button v-if="!target?.immutable" link size="small" @click.stop="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
             </div>
             <details v-else class="config-entry" @toggle="onConfigToggle(entry.key, $event)">
-              <summary class="config-key">{{ entry.key }}</summary>
+              <summary class="config-key">{{ entry.key }}
+                <el-button v-if="!target?.immutable" link size="small" class="config-edit-button" @click.stop.prevent="startKeyEdit(entry)">{{ t('k8s.edit') }}</el-button>
+              </summary>
               <div v-if="expandedConfig.has(entry.key)">
                 <div v-if="entry.lang === 'conf' && decodePropertiesUnicode(entry.value) !== entry.value" class="config-preview-toolbar">
                   <el-button size="small" @click="toggleRawProperties(entry.key)">{{ rawProperties.has(entry.key) ? 'Unicode' : 'Raw' }}</el-button>
@@ -156,6 +159,22 @@
       </div>
     </div>
 
+    <el-dialog v-model="keyEditVisible" :title="keyEditName" width="min(56rem, 92vw)" append-to-body destroy-on-close
+      :close-on-click-modal="false" :close-on-press-escape="!keySaving" :show-close="!keySaving">
+      <div v-if="keyEditLang === 'conf'" class="config-edit-encoding">
+        {{ keyEditRaw ? 'Raw' : 'Unicode' }}
+      </div>
+      <div class="config-key-editor">
+        <SyntaxEditor ref="keyEditorRef" v-model="keyEditDraft" :file-path="keyEditName" :lang="keyEditLang"
+          compact show-search-button :readonly="keySaving" selection-copy-menu @selection-contextmenu="onEditorCopyContextMenu" />
+      </div>
+      <div v-if="keySaveError" class="yaml-error">{{ keySaveError }}</div>
+      <template #footer>
+        <el-button :disabled="keySaving" @click="keyEditVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="keySaving" @click="saveKeyEdit">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
+
     <Menu ref="copyMenuRef" v-model:visible="copyMenuVisible">
       <MenuItem @click="onCopyMenu">{{ t('k8s.copy') }}</MenuItem>
     </Menu>
@@ -164,7 +183,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { ElButton, ElIcon, ElMessage, ElSelect, ElOption, ElCheckbox } from 'element-plus'
+import { ElButton, ElIcon, ElMessage, ElSelect, ElOption, ElCheckbox, ElDialog } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
 import { dump, load } from 'js-yaml'
 import { getResource, genericDetailSections, configMapEntries, type DetailSection } from '../services/k8sResources'
@@ -172,7 +191,7 @@ import { requestJSON, startLogStream, type LogHandle } from '../services/k8sClie
 import { useI18n } from '../i18n'
 import Menu from './Menu.vue'
 import SyntaxEditor from './SyntaxEditor.vue'
-import { decodePropertiesUnicode } from '../services/propertiesPreview'
+import { decodePropertiesUnicode, restorePropertiesUnicode } from '../services/propertiesPreview'
 import { writeClipboard } from '../composables/useClipboardWrite'
 import MenuItem from './MenuItem.vue'
 
@@ -269,7 +288,74 @@ function toggleRawProperties(key: string) {
   if (rawProperties.value.has(key)) rawProperties.value.delete(key)
   else rawProperties.value.add(key)
 }
-const configEntries = computed(() => configMapEntries(props.target?.data))
+const savedConfigMap = ref<any>(null)
+const configEntries = computed(() => configMapEntries((savedConfigMap.value || props.target)?.data))
+const keyEditVisible = ref(false)
+const keySaving = ref(false)
+const keySaveError = ref('')
+const keyEditName = ref('')
+const keyEditLang = ref<string>()
+const keyEditOriginal = ref('')
+const keyEditRaw = ref(false)
+const keyEditDraft = ref('')
+const keyEditorRef = ref<InstanceType<typeof SyntaxEditor> | null>(null)
+let keyEditTarget: any = null
+let keyEditConnId = ''
+let keyEditSession = 0
+
+function startKeyEdit(entry: { key: string; value: string; lang?: string }) {
+  const obj = savedConfigMap.value || props.target
+  if (!obj || obj.immutable || keySaving.value) return
+  keyEditTarget = obj
+  keyEditConnId = props.connId
+  keyEditName.value = entry.key
+  keyEditLang.value = entry.lang
+  keyEditOriginal.value = entry.value
+  keyEditRaw.value = entry.lang === 'conf' && rawProperties.value.has(entry.key)
+  keyEditDraft.value = entry.lang === 'conf' && !keyEditRaw.value ? decodePropertiesUnicode(entry.value) : entry.value
+  keySaveError.value = ''
+  keyEditSession++
+  keyEditVisible.value = true
+}
+
+async function saveKeyEdit() {
+  if (keySaving.value || !keyEditTarget || !keyEditVisible.value) return
+  const session = keyEditSession
+  const normalize = (s: string) => s.replace(/\r\n|\r/g, '\n')
+  const original = keyEditOriginal.value
+  const text = keyEditorRef.value?.getValue() ?? keyEditDraft.value
+  const value = keyEditLang.value === 'conf' && !keyEditRaw.value
+    ? restorePropertiesUnicode(original, text)
+    : normalize(original) === normalize(text) ? original
+      : original.includes('\r\n') ? normalize(text).replace(/\n/g, '\r\n') : text
+  if (value === original) { keyEditVisible.value = false; return }
+  const uid = keyEditTarget.metadata?.uid
+  if (!uid) { keySaveError.value = 'ConfigMap UID is missing. Reopen the resource and retry.'; return }
+  const keyPath = '/data/' + keyEditName.value.replace(/~/g, '~0').replace(/\//g, '~1')
+  const resourcePath = selfPath(keyEditTarget)
+  keySaving.value = true
+  keySaveError.value = ''
+  try {
+    // Atomic optimistic concurrency: a concurrent change to this key or a
+    // deleted/recreated ConfigMap rejects the patch; other keys are untouched.
+    const { status, data, raw } = await requestJSON(keyEditConnId, 'PATCH', resourcePath, [
+      { op: 'test', path: '/metadata/uid', value: uid },
+      { op: 'test', path: keyPath, value: original },
+      { op: 'replace', path: keyPath, value },
+    ], 'application/json-patch+json')
+    if (status < 200 || status >= 300) throw new Error(`HTTP ${status}: ${raw?.slice(0, 300) || ''}`)
+    if (session !== keyEditSession) return
+    savedConfigMap.value = data || { ...keyEditTarget, data: { ...keyEditTarget.data, [keyEditName.value]: value } }
+    keyEditVisible.value = false
+    emit('saved')
+    ElMessage.success(t('k8s.saved'))
+  } catch (e: any) {
+    if (session === keyEditSession) keySaveError.value = String(e?.message || e)
+  } finally {
+    keySaving.value = false
+  }
+}
+
 
 function onConfigToggle(key: string, event: Event) {
   if ((event.target as HTMLDetailsElement).open) expandedConfig.value.add(key)
@@ -281,6 +367,10 @@ watch(() => props.target, () => {
   editing.value = false; saveError.value = ''
   expandedConfig.value = new Set()
   rawProperties.value = new Set()
+  savedConfigMap.value = null
+  keyEditSession++
+  keyEditVisible.value = false
+  keyEditTarget = null
   events.value = []; eventsError.value = ''
   if (isPod.value) loadEvents()
 })
@@ -377,7 +467,7 @@ async function loadEvents() {
 
 const yamlText = computed(() => {
   if (!props.target) return ''
-  try { return dump(props.target, { sortKeys: false, lineWidth: 120 }) }
+  try { return dump(savedConfigMap.value || props.target, { sortKeys: false, lineWidth: 120 }) }
   catch (e: any) { return `# dump failed: ${e?.message || e}` }
 })
 
@@ -478,6 +568,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.config-edit-button { float: right; margin-right: 0.25rem; }
+.config-key-editor { height: min(55vh, 32rem); }
+.config-edit-encoding { color: var(--text-muted); font-size: 0.75rem; margin-bottom: 0.375rem; }
+
 .config-preview-toolbar { display: flex; justify-content: flex-end; margin-top: 0.375rem; }
 
 .detail-value.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
