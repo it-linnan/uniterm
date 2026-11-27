@@ -18,7 +18,18 @@
           <div class="detail-section-title">{{ sec.label }}</div>
           <div v-for="f in sec.fields" :key="f.label" class="detail-row">
             <span class="detail-label">{{ f.label }}</span>
-            <span class="detail-value">{{ fieldText(f) }}</span>
+            <div v-if="f.label === 'Annotations'" class="detail-value k8s-annotations">
+              <div v-for="[key, value] in annotationEntries" :key="key" class="k8s-annotation">
+                <div class="k8s-annotation-key">{{ key }}</div>
+                <details v-if="value.length > 160 || value.includes('\n')">
+                  <summary>{{ value.slice(0, 100) }}{{ value.length > 100 ? '…' : '' }}</summary>
+                  <pre>{{ value }}</pre>
+                </details>
+                <div v-else class="k8s-annotation-value">{{ value }}</div>
+              </div>
+              <span v-if="!annotationEntries.length">—</span>
+            </div>
+            <span v-else class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
         <!-- Pod events (async) -->
@@ -179,6 +190,8 @@ const sections = computed<DetailSection[]>(() => {
   return genericDetailSections()
 })
 
+const annotationEntries = computed(() => Object.entries((props.target?.metadata?.annotations || {}) as Record<string, string>))
+
 function fieldText(f: any): string {
   if (!props.target) return ''
   const v = f.value(props.target)
@@ -314,6 +327,13 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.k8s-annotations { min-width: 0; word-break: normal; }
+.k8s-annotation + .k8s-annotation { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
+.k8s-annotation-key { color: var(--text-muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+.k8s-annotation-value, .k8s-annotation summary { overflow-wrap: anywhere; white-space: pre-wrap; }
+.k8s-annotation summary { cursor: pointer; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k8s-annotation pre { margin: 0.25rem 0 0; max-height: 16rem; overflow: auto; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* Copied verbatim from MonitorTabContent.vue */
 .detail-drawer-backdrop {
   position: absolute;
