@@ -8,6 +8,9 @@
     <!-- Custom search/replace bar: the built-in CodeMirror panel's look
          doesn't match the app, so search state/highlighting is managed here
          and the cursor work goes through RegExpCursor. -->
+    <button v-if="props.showSearchButton && !searchOpen" class="search-icon-btn editor-search-toggle" :title="t('sftp.edit.search')" @click="openSearch()">
+      <el-icon><Search :size="'0.875rem'" /></el-icon>
+    </button>
     <div v-if="searchOpen" class="search-bar" @keydown="onSearchBarKeydown">
       <div class="search-row">
         <button class="search-icon-btn" :class="{ active: caseSensitive }" :title="t('sftp.edit.matchCase')" @click="caseSensitive = !caseSensitive">
@@ -86,8 +89,8 @@ import { RegExpCursor } from '@codemirror/search'
 import { Clipboard } from '@wailsio/runtime'
 import { writeClipboard } from '../composables/useClipboardWrite'
 import { useI18n } from '../i18n'
-import { CaseSensitive, ChevronDown, ChevronUp, ChevronsDownUp, Regex, Replace, ReplaceAll, WholeWord, X } from '@lucide/vue'
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, foldKeymap, StreamLanguage } from '@codemirror/language'
+import { CaseSensitive, ChevronDown, ChevronUp, ChevronsDownUp, Regex, Replace, ReplaceAll, Search, WholeWord, X } from '@lucide/vue'
+import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, foldKeymap, foldService, StreamLanguage } from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { json } from '@codemirror/lang-json'
 import { javascript } from '@codemirror/lang-javascript'
@@ -100,6 +103,7 @@ import { sql } from '@codemirror/lang-sql'
 import { yaml } from '@codemirror/lang-yaml'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { properties } from '@codemirror/legacy-modes/mode/properties'
+import { propertiesFoldRange } from '../services/propertiesPreview'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
 import { nginx } from '@codemirror/legacy-modes/mode/nginx'
@@ -123,6 +127,7 @@ const props = withDefaults(defineProps<{
   lang?: string
   wrap?: boolean
   readonly?: boolean
+  showSearchButton?: boolean
   selectionCopyMenu?: boolean
   fontSize?: number
 }>(), { wrap: true })
@@ -559,6 +564,8 @@ function buildExtensions(path: string) {
     // query itself is managed by the Vue search bar above the editor).
     searchDecoField,
     foldGutter(),
+    ...(props.lang === 'conf' || (!props.lang && extOf(path) === 'properties')
+      ? [foldService.of((state, start) => propertiesFoldRange(state.doc, start))] : []),
     bracketMatching(),
     // Dark: One Dark tokens; light: defaultHighlightStyle (light-tuned) takes
     // over as the active highlighter via the fallback chain.
@@ -788,6 +795,8 @@ defineExpose({
 </script>
 
 <style scoped>
+.editor-search-toggle { position: absolute; top: 0.25rem; right: 0.5rem; z-index: 10; background: var(--bg-base); }
+
 .syntax-editor {
   position: relative;
   width: 100%;
