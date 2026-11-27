@@ -8,6 +8,7 @@ import {
   K8sStartLogStream,
   K8sStopLogStream,
   K8sExecSession,
+  K8sStartPortForward, K8sStopPortForward, K8sListPortForwards,
 } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { Events } from '@wailsio/runtime'
 import type { K8sContextInfo, K8sWatchEvent } from '../types/k8s'
@@ -110,3 +111,10 @@ export async function startLogStream(
 export async function execSession(connId: string, ns: string, pod: string, container: string) {
   return await K8sExecSession(connId, ns, pod, container)
 }
+
+export interface PortForwardInfo {id:string;connId:string;namespace:string;pod:string;localPort:number;remotePort:number;lastError:string}
+export async function startPortForward(connId:string,ns:string,pod:string,localPort:number,remotePort:number):Promise<PortForwardInfo>{
+  return await K8sStartPortForward(connId,ns,pod,localPort,remotePort)
+}
+export async function stopPortForward(connId:string,id:string){await K8sStopPortForward(connId,id)}
+export async function listPortForwards(connId:string):Promise<PortForwardInfo[]>{return await K8sListPortForwards(connId)}

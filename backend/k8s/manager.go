@@ -24,6 +24,7 @@ type Manager struct {
 	conns   map[string]*connection
 	watches map[string]*watchHandle
 	logs    map[string]*logHandle
+	forwards map[string]*portForwardHandle
 	// emit is set once in startup via SetEventEmitter and never changes,
 	// so we store it in atomic.Value to let StartWatch/StartLogStream
 	// capture it without grabbing the manager mutex (F-413).
@@ -219,6 +220,10 @@ func (m *Manager) Disconnect(connID string) {
 			logsToStop = append(logsToStop, sid)
 		}
 	}
+	var forwardsToStop []string
+	for id, f := range m.forwards {
+		if f.info.ConnID == connID { forwardsToStop = append(forwardsToStop, id) }
+	}
 	onClose := conn.onClose
 	delete(m.conns, connID)
 	m.mu.Unlock()
@@ -229,6 +234,7 @@ func (m *Manager) Disconnect(connID string) {
 	for _, sid := range logsToStop {
 		m.StopLogStream(sid)
 	}
+	for _, id := range forwardsToStop { m.StopPortForward(connID, id) }
 	if onClose != nil {
 		onClose()
 	}
