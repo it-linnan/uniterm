@@ -27,7 +27,7 @@
       </span>
     </div>
 
-    <div v-if="listError" class="k8s-list-err">{{ listErrorText }}</div>
+    <div v-if="listError || subscriptionError" class="k8s-list-err">{{ listErrorText || subscriptionError }}</div>
 
     <!-- CRD 实例列表：动态列 -->
     <el-table
@@ -551,6 +551,9 @@ function usageOf(row: any): Usage | null {
 
 // ── subscription lifecycle（frame 驱动）─────────────────────────
 let subs: { res: string; ns: string }[] = []
+let subsConn = ''
+let subsGeneration=0
+const subscriptionError=ref('')
 
 function subsFor(f: NavFrame): { res: string; ns: string }[] {
   if (f.kind === 'overview' || f.kind === 'custom') return []
@@ -576,11 +579,13 @@ async function loadCrd() {
 
 async function applySubs() {
   if (!props.connId) return
-  const old = subs
+  const gen=++subsGeneration, conn=props.connId
+  const old = subs, oldConn=subsConn
   const next = subsFor(props.frame)
-  subs = next
-  for (const s of old) store.unsubscribe(props.connId, s.res, s.ns)
-  for (const s of next) await store.subscribe(props.connId, s.res, s.ns)
+  subs = next; subsConn=conn; subscriptionError.value=''
+  for (const s of old) store.unsubscribe(oldConn, s.res, s.ns)
+  await Promise.all(next.map(s=>store.subscribe(conn,s.res,s.ns).catch(e=>{if(gen===subsGeneration)subscriptionError.value=String(e?.message||e)})))
+  if(gen!==subsGeneration || conn!==props.connId)return
   startMetrics()
   if (props.frame.kind === 'custom') { crdItems.value = []; await loadCrd() }
 }
@@ -604,7 +609,9 @@ async function onRefresh() {
 
 onBeforeUnmount(() => {
   stopMetrics()
-  for (const s of subs) store.unsubscribe(props.connId, s.res, s.ns)
+  subsGeneration++
+  for (const s of subs) store.unsubscribe(subsConn, s.res, s.ns)
+  subs=[]
 })
 </script>
 
