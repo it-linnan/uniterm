@@ -135,16 +135,8 @@
         </div>
         <K8sRelatedDetails :conn-id="connId" :resource-key="resourceKey" :target="target"
           @navigate="navigateRelated" @logs="(name, previous) => $emit('container-logs', name, previous)" @terminal="name => $emit('container-terminal', name)" />
-        <!-- Pod events (async) -->
-        <div v-if="isPod" class="detail-section">
-          <div class="detail-section-title">Events</div>
-          <div v-if="eventsError" class="detail-row"><span class="detail-value">{{ eventsError }}</span></div>
-          <div v-else-if="!events.length" class="detail-row"><span class="detail-value">—</span></div>
-          <div v-else v-for="(ev, i) in events" :key="i" class="detail-row">
-            <span class="detail-label">{{ ev.lastTimestamp || ev.eventTime || '' }}</span>
-            <span class="detail-value">{{ ev.type }} {{ ev.reason }}: {{ ev.message }}</span>
-          </div>
-        </div>
+        <K8sSecretDetails v-if="resourceKey === 'secrets'" :conn-id="connId" :target="target" @saved="onSecretSaved" />
+        <K8sDiagnostics :conn-id="connId" :target="target" :resource-key="resourceKey" @navigate="navigateRelated" />
       </div>
 
       <div v-show="tab === 'yaml'" class="yaml-pane">
@@ -210,6 +202,8 @@ import { decodePropertiesUnicode, restorePropertiesUnicode } from '../services/p
 import { writeClipboard } from '../composables/useClipboardWrite'
 import MenuItem from './MenuItem.vue'
 import K8sRelatedDetails from './K8sRelatedDetails.vue'
+import K8sDiagnostics from './K8sDiagnostics.vue'
+import K8sSecretDetails from './K8sSecretDetails.vue'
 import { podContainers, type ResourceRef } from '../services/k8sRelations'
 
 const props = defineProps<{ connId: string; mode: 'detail' | 'logs' | null; target: any | null; resourceKey: string; selfPathOverride?: (obj: any) => string; initialTab?: 'detail' | 'yaml'; canGoBack?: boolean; initialContainer?: string; initialPrevious?: boolean }>()
@@ -463,8 +457,7 @@ watch(() => props.target, () => {
   keyEditSession++
   keyEditVisible.value = false
   keyEditTarget = null
-  events.value = []; eventsError.value = ''
-  if (isPod.value) loadEvents()
+
 })
 
 const headerTitle = computed(() => {
@@ -511,6 +504,7 @@ const sections = computed<DetailSection[]>(() => {
     ...sec,
     fields: sec.fields.filter(field => {
       if (props.resourceKey === 'services' && field.label === 'Ports') return false
+      if (props.resourceKey === 'secrets' && field.label === 'Keys') return false
       if (props.resourceKey === 'pods' && ['Containers','Volumes'].includes(field.label)) return false
       if (field.label === 'Labels') return Object.keys(metadata?.labels || {}).length > 0
       if (field.label === 'Annotations') return Object.keys(metadata?.annotations || {}).length > 0
@@ -538,35 +532,7 @@ function fieldText(f: any): string {
   return typeof v === 'object' && v ? v.text : String(v ?? '')
 }
 
-// ── Pod events (async fetch; can't ride the synchronous detailSections model) ──
-const events = ref<any[]>([])
-const eventsError = ref('')
-const isPod = computed(() => {
-  if (props.mode !== 'detail' || !props.target) return false
-  const kind = props.target.kind || getResource(props.resourceKey)?.kind
-  return props.resourceKey === 'pods' || kind === 'Pod'
-})
-let eventsGen = 0
-async function loadEvents() {
-  const myGen = ++eventsGen
-  const o = props.target
-  if (!o?.metadata) return
-  const ns = o.metadata.namespace || ''
-  const name = o.metadata.name || ''
-  const path = `/api/v1/namespaces/${encodeURIComponent(ns)}/events?fieldSelector=involvedObject.name%3D${encodeURIComponent(name)}&limit=200`
-  try {
-    const { status, data, raw } = await requestJSON<any>(props.connId, 'GET', path)
-    if (myGen !== eventsGen) return
-    if (status === 200 && data) {
-      events.value = (data.items || []).slice().sort((a: any, b: any) =>
-        String(a.lastTimestamp || a.eventTime || '').localeCompare(String(b.lastTimestamp || b.eventTime || '')))
-    } else {
-      eventsError.value = `HTTP ${status}: ${raw?.slice(0, 200) || ''}`
-    }
-  } catch (e: any) {
-    if (myGen === eventsGen) eventsError.value = String(e?.message || e)
-  }
-}
+function onSecretSaved(obj:any){ savedConfigMap.value=obj; emit('saved') }
 
 const yamlText = computed(() => {
   if (!props.target) return ''
