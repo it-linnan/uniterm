@@ -57,6 +57,26 @@ export interface ResourceDescriptor {
 
 // ── 通用列生成器 ────────────────────────────────────────────────
 
+// Keep ConfigMap values as strings; language detection is only for display.
+export function configMapEntries(data: Record<string, string> | undefined) {
+  return Object.entries(data || {}).map(([key, value]) => {
+    const ext = key.toLowerCase().split('.').pop()
+    const known: Record<string, string> = { yaml: 'yaml', yml: 'yaml', json: 'json', properties: 'conf', xml: 'xml' }
+    let lang = Object.prototype.hasOwnProperty.call(known, ext || '') ? known[ext!] : undefined
+    const multiline = /[\r\n]/.test(value)
+    if (!lang && multiline) {
+      const trimmed = value.trim()
+      if (/^[{\[]/.test(trimmed)) {
+        try { JSON.parse(trimmed); lang = 'json' } catch { /* not JSON */ }
+      }
+      if (!lang && /^<\?xml\b|^<[a-zA-Z][\w:-]*[\s>]/.test(trimmed)) lang = 'xml'
+      if (!lang && /^\s*[\w.-]+\s*=/m.test(value)) lang = 'conf'
+      if (!lang && /^\s*[\w.-]+:(?:\s|$)/m.test(value)) lang = 'yaml'
+    }
+    return { key, value, lang, multiline: multiline || !!lang }
+  })
+}
+
 export function age(ts: string | undefined): string {
   if (!ts) return '—'
   const diff = Date.now() - new Date(ts).getTime()
