@@ -18,7 +18,22 @@
           <div class="detail-section-title">{{ sec.label }}</div>
           <div v-for="f in sec.fields" :key="f.label" class="detail-row">
             <span class="detail-label">{{ f.label }}</span>
-            <span class="detail-value">{{ fieldText(f) }}</span>
+            <div v-if="f.label === 'Conditions'" class="detail-value k8s-conditions">
+              <div v-for="(condition, index) in target?.status?.conditions || []" :key="condition.type || index" class="k8s-condition">
+                <div class="k8s-condition-header">
+                  <strong>{{ condition.type || '—' }}</strong>
+                  <span :class="['k8s-condition-status', conditionTone(condition)]">
+                    {{ conditionTone(condition) === 'ok' ? '✓' : conditionTone(condition) === 'warn' ? '!' : '·' }}
+                    {{ condition.status || '—' }}
+                  </span>
+                </div>
+                <div v-if="condition.reason" class="k8s-condition-reason">{{ condition.reason }}</div>
+                <div v-if="condition.message" class="k8s-condition-message">{{ condition.message }}</div>
+                <div v-if="condition.lastTransitionTime" class="k8s-condition-time">{{ condition.lastTransitionTime }}</div>
+              </div>
+              <span v-if="!target?.status?.conditions?.length">—</span>
+            </div>
+            <span v-else class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
         <!-- Pod events (async) -->
@@ -173,11 +188,28 @@ const headerTitle = computed(() => {
   return `${o.kind || getResource(props.resourceKey)?.kind || '?'} / ${o.metadata?.namespace || 'cluster'} / ${o.metadata?.name || ''}`
 })
 
-const sections = computed<DetailSection[]>(() => {
+const baseSections = computed<DetailSection[]>(() => {
   const desc = getResource(props.resourceKey)
   if (desc?.detailSections?.length) return desc.detailSections
   return genericDetailSections()
 })
+
+// A resource may expose conditions even when its descriptor has no explicit field.
+const sections = computed<DetailSection[]>(() => {
+  const existing = baseSections.value
+  if (!props.target?.status?.conditions?.length || existing.some(sec => sec.fields.some(f => f.label === 'Conditions'))) return existing
+  return [...existing, { label: 'Conditions', fields: [{ label: 'Conditions', value: () => '' }] }]
+})
+
+// Only known condition types have a success/warning interpretation.
+const positiveConditions = new Set(['Ready', 'ContainersReady', 'Initialized', 'PodScheduled', 'Available', 'Complete', 'Established', 'NamesAccepted', 'Accepted', 'Programmed', 'ResolvedRefs', 'Succeeded'])
+const negativeConditions = new Set(['MemoryPressure', 'DiskPressure', 'PIDPressure', 'NetworkUnavailable', 'ReplicaFailure', 'Degraded'])
+function conditionTone(condition: { type?: string; status?: string }): 'ok' | 'warn' | 'neutral' {
+  if (condition.status !== 'True' && condition.status !== 'False') return 'neutral'
+  if (positiveConditions.has(condition.type || '')) return condition.status === 'True' ? 'ok' : 'warn'
+  if (negativeConditions.has(condition.type || '')) return condition.status === 'False' ? 'ok' : 'warn'
+  return 'neutral'
+}
 
 function fieldText(f: any): string {
   if (!props.target) return ''
@@ -314,6 +346,15 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
+.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
+.k8s-condition + .k8s-condition { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
+.k8s-condition-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem; }
+.k8s-condition-status.ok { color: var(--el-color-success, #67c23a); }
+.k8s-condition-status.warn { color: var(--el-color-warning, #e6a23c); }
+.k8s-condition-status.neutral, .k8s-condition-time { color: var(--text-muted); }
+.k8s-condition-reason, .k8s-condition-time { font-size: 0.75rem; }
+.k8s-condition-message { white-space: pre-wrap; }
+
 /* Copied verbatim from MonitorTabContent.vue */
 .detail-drawer-backdrop {
   position: absolute;
