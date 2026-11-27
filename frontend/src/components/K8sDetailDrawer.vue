@@ -73,7 +73,7 @@
             <span v-else class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
-        <div v-if="resourceKey === 'configmaps'" class="detail-section">
+        <div v-if="resourceKey === 'configmaps'" :key="target?.metadata?.uid || headerTitle" class="detail-section">
           <div class="detail-section-title">Data ({{ configEntries.length }})</div>
           <template v-for="entry in configEntries" :key="entry.key">
             <div v-if="!entry.multiline" class="detail-row">
@@ -455,7 +455,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
+.detail-value.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
 .k8s-condition + .k8s-condition { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
 .k8s-condition-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem; }
 .k8s-condition-status.ok { color: var(--el-color-success, #67c23a); }
@@ -464,17 +464,17 @@ onBeforeUnmount(() => {
 .k8s-condition-reason, .k8s-condition-time { font-size: 0.75rem; }
 .k8s-condition-message { white-space: pre-wrap; }
 
-.k8s-annotations { min-width: 0; word-break: normal; }
+.detail-value.k8s-annotations { min-width: 0; word-break: normal; }
 .k8s-annotation + .k8s-annotation { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
 .k8s-annotation-key { color: var(--text-muted); font-size: 0.75rem; overflow-wrap: anywhere; }
 .k8s-annotation-value, .k8s-annotation summary { overflow-wrap: anywhere; white-space: pre-wrap; }
 .k8s-annotation summary { cursor: pointer; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .k8s-annotation pre { margin: 0.25rem 0 0; max-height: 16rem; overflow: auto; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.k8s-labels { display: flex; flex-wrap: wrap; gap: 0.375rem; min-width: 0; }
+.detail-value.k8s-labels { display: flex; flex-wrap: wrap; gap: 0.375rem; min-width: 0; }
 .k8s-label-chip { max-width: 100%; padding: 0.2rem 0.375rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-hover); overflow-wrap: anywhere; word-break: normal; }
 
-.ingress-detail-table { min-width: 0; overflow-x: auto; white-space: normal; word-break: normal; }
+.detail-value.ingress-detail-table { min-width: 0; overflow-x: auto; white-space: normal; word-break: normal; }
 .ingress-detail-table table { border-collapse: collapse; width: 100%; text-align: left; }
 .ingress-detail-table th, .ingress-detail-table td { padding: 0.375rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; overflow-wrap: anywhere; }
 .ingress-detail-table th { color: var(--text-muted); font-weight: 500; }
