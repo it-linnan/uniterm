@@ -21,7 +21,7 @@
             <span class="detail-value">{{ fieldText(f) }}</span>
           </div>
         </div>
-        <div v-if="resourceKey === 'configmaps'" class="detail-section">
+        <div v-if="resourceKey === 'configmaps'" :key="target?.metadata?.uid || headerTitle" class="detail-section">
           <div class="detail-section-title">Data ({{ configEntries.length }})</div>
           <template v-for="entry in configEntries" :key="entry.key">
             <div v-if="!entry.multiline" class="detail-row">
