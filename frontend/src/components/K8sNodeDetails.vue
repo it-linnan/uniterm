@@ -20,12 +20,12 @@ import {useI18n} from '../i18n'
 import {listRelated,type ResourceRef} from '../services/k8sRelations'
 import {requestJSON} from '../services/k8sClient'
 import {parseCpu,parseMemory,formatCpu,formatMemory} from '../services/k8sQuantity'
-import {podResourceTotals} from '../services/k8sResources'
+import {effectivePodResources} from '../services/k8sNodeResources'
 const props=defineProps<{connId:string;target:any}>()
 defineEmits<{(e:'navigate',r:ResourceRef):void}>()
 const {t}=useI18n()
 const pods=ref<any[]>([]),podKnown=ref(false),metrics=ref<any>(null),metricsMissing=ref(false),loading=ref(false),error=ref('')
-const totals=computed(()=>pods.value.filter(p=>!['Succeeded','Failed'].includes(p.status?.phase)).reduce((a,p)=>{const v=podResourceTotals(p);return {cpuReq:a.cpuReq+v.cpuReq,cpuLim:a.cpuLim+v.cpuLim,memReq:a.memReq+v.memReq,memLim:a.memLim+v.memLim}},{cpuReq:0,cpuLim:0,memReq:0,memLim:0}))
+const totals=computed(()=>pods.value.filter(p=>!['Succeeded','Failed'].includes(p.status?.phase)).reduce((a,p)=>{const v=effectivePodResources(p);return {cpuReq:a.cpuReq+v.cpuReq,cpuLim:a.cpuLim+v.cpuLim,memReq:a.memReq+v.memReq,memLim:a.memLim+v.memLim}},{cpuReq:0,cpuLim:0,memReq:0,memLim:0}))
 const rows=computed(()=>{const s=props.target?.status||{},v=totals.value;return [{label:'CPU',capacity:s.capacity?.cpu||'—',allocatable:s.allocatable?.cpu||'—',requests:podKnown.value?formatCpu(v.cpuReq):'—',limits:podKnown.value?formatCpu(v.cpuLim):'—',usage:metrics.value?.cpu?formatCpu(parseCpu(metrics.value.cpu)):'—'},{label:'Memory',capacity:s.capacity?.memory||'—',allocatable:s.allocatable?.memory||'—',requests:podKnown.value?formatMemory(v.memReq):'—',limits:podKnown.value?formatMemory(v.memLim):'—',usage:metrics.value?.memory?formatMemory(parseMemory(metrics.value.memory)):'—'},{label:'Pods',capacity:s.capacity?.pods||'—',allocatable:s.allocatable?.pods||'—',requests:'—',limits:'—',usage:podKnown.value?String(pods.value.filter(p=>!['Succeeded','Failed'].includes(p.status?.phase)).length):'—'}]})
 const bars=computed(()=>{const s=props.target?.status?.allocatable||{},out:{label:string;text:string;width:number}[]=[];const add=(label:string,n:number,d:number)=>{if(d>0){const p=Math.round(n/d*100);out.push({label,text:p+'%',width:Math.min(100,Math.max(0,p))})}};if(podKnown.value){add('CPU requests',totals.value.cpuReq,parseCpu(s.cpu));add('Memory requests',totals.value.memReq,parseMemory(s.memory))}if(metrics.value?.cpu)add('CPU usage',parseCpu(metrics.value.cpu),parseCpu(s.cpu));if(metrics.value?.memory)add('Memory usage',parseMemory(metrics.value.memory),parseMemory(s.memory));return out})
 let gen=0

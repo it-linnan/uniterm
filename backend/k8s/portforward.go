@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,7 @@ func (h *portForwardHandle) report(err error) {
 	h.mu.Unlock()
 }
 func (m *Manager) StartPortForward(connID, ns, pod string, localPort, remotePort int) (PortForwardInfo, error) {
-	if ns == "" || pod == "" || localPort < 0 || localPort > 65535 || remotePort < 1 || remotePort > 65535 {
+	if ns == "" || pod == "" || strings.ContainsAny(ns+pod, "/\\?#") || localPort < 0 || localPort > 65535 || remotePort < 1 || remotePort > 65535 {
 		return PortForwardInfo{}, fmt.Errorf("invalid namespace, pod or port")
 	}
 	// Bind only loopback; remote cluster access is never exposed on LAN by default.
@@ -101,7 +102,7 @@ func forwardPortConnection(ctx context.Context, conn *connection, ns,pod string,
 	u,err:=url.Parse(conn.base)
 	if err!=nil{return err}
 	if u.Scheme=="https"{u.Scheme="wss"}else{u.Scheme="ws"}
-	u.Path += "/api/v1/namespaces/"+ns+"/pods/"+pod+"/portforward"
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/v1/namespaces/"+ns+"/pods/"+pod+"/portforward"
 	q:=url.Values{}
 	q.Set("ports",strconv.Itoa(port))
 	u.RawQuery=q.Encode()

@@ -10,7 +10,7 @@
    <template v-if="activeKey===key">
     <div class="secret-mode"><el-button size="small" link :disabled="!!editKey" @click="raw=!raw">{{ raw?'Decode UTF-8':'Base64' }}</el-button><span>{{ raw?'Base64':'UTF-8' }}</span></div>
     <div v-if="decodeError && !raw" class="error">{{ decodeError }}</div>
-    <div v-else class="secret-editor"><SyntaxEditor :key="key+'/'+raw+'/'+!!editKey" :model-value="editKey===key?draft:displayValue" :file-path="raw?'':key" :lang="raw?undefined:language" :readonly="!editKey || saving" compact show-search-button @update:model-value="v=>{if(editKey)draft=v}" /></div>
+    <div v-else class="secret-editor"><SyntaxEditor :ref="setEditor" :key="key+'/'+raw+'/'+!!editKey" :model-value="editKey===key?draft:displayValue" :file-path="raw?'':key" :lang="raw?undefined:language" :readonly="!editKey || saving" compact show-search-button @update:model-value="v=>{if(editKey)draft=v}" /></div>
     <div v-if="editKey===key" class="secret-mode"><el-button size="small" :disabled="saving" @click="cancel">{{ t('common.cancel') }}</el-button><el-button size="small" type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button></div>
     <div v-if="error" class="error">{{ error }}</div>
    </template>
@@ -35,6 +35,8 @@ function encode(v:string){let binary='';for(const b of new TextEncoder().encode(
 const decodeError=computed(()=>{if(!activeKey.value||raw.value)return '';try{decode(object.value?.data?.[activeKey.value]||'');return ''}catch{return 'Not valid UTF-8; use Base64 mode.'}})
 const displayValue=computed(()=>{const v=object.value?.data?.[activeKey.value]||'';if(raw.value)return v;try{return decode(v)}catch{return ''}})
 const language=computed(()=>configMapEntries({[activeKey.value]:displayValue.value})[0]?.lang)
+const editor=ref<InstanceType<typeof SyntaxEditor>|null>(null)
+function setEditor(v:unknown){editor.value=v as InstanceType<typeof SyntaxEditor>|null}
 let generation=0
 watch(()=>props.target,()=>{generation++;saved.value=null;activeKey.value='';editKey.value='';draft.value='';error.value='';raw.value=false})
 function toggle(key:string){activeKey.value=activeKey.value===key?'':key;raw.value=false;error.value='';draft.value=''}
@@ -45,7 +47,8 @@ async function save(){
  const o=object.value,key=editKey.value,original=o.data[key],uid=o.metadata?.uid,g= generation
  if(!uid||o.immutable)return
  let value:string
- try{value=raw.value?btoa(atob(draft.value)):encode(draft.value)}catch{error.value='Invalid Base64';return}
+ const text=editor.value?.getValue() ?? draft.value
+ try{value=raw.value?btoa(atob(text)):encode(text)}catch{error.value='Invalid Base64';return}
  if(value===original){cancel();return}
  const p='/data/'+key.replace(/~/g,'~0').replace(/\//g,'~1')
  saving.value=true;error.value=''
