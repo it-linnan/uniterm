@@ -44,8 +44,8 @@
             <el-button size="small" @click="cancelEdit">{{ t('common.cancel') }}</el-button>
           </template>
         </div>
-        <pre v-if="!editing" class="k8s-yaml-drawer-body" @contextmenu="onCopyContextMenu">{{ yamlText }}</pre>
-        <SyntaxEditor v-else v-model="draft" lang="yaml" compact />
+        <SyntaxEditor v-if="!editing && tab === 'yaml'" :model-value="yamlText" lang="yaml" readonly compact />
+        <SyntaxEditor v-else-if="editing" v-model="draft" lang="yaml" compact />
         <div v-if="saveError" class="yaml-error">{{ saveError }}</div>
       </div>
     </template>
