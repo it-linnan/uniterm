@@ -346,7 +346,7 @@ onBeforeUnmount(stopLogs)
 </script>
 
 <style scoped>
-.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
+.detail-value.k8s-conditions { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
 .k8s-condition + .k8s-condition { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
 .k8s-condition-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem; }
 .k8s-condition-status.ok { color: var(--el-color-success, #67c23a); }
